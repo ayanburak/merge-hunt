@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Secrets, the real token lives here
+.env
+
+# Local database and other runtime data
+backend/data/
+
+# Node
+node_modules/
+frontend/dist/
