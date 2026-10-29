@@ -1,6 +1,6 @@
 """
 file: metrics.py
-importable: MetricOptions, Outcome, RepoMetrics, is_bot, is_external, outcome, first_response_at, compute_metrics
+importable: MetricOptions, Outcome, RepoMetrics, is_bot, is_external, outcome, first_response_at, compute_metrics, count_commits
 
 compute_metrics(prs, options, now) is the entry point, it takes the raw pull
 requests of one repo and returns a RepoMetrics. The smaller functions work on
@@ -14,7 +14,10 @@ A rate in RepoMetrics is None when fewer pull requests than options.min_sample
 went into it. The counts next to it are always filled, so the UI can say
 there is not enough data and still show how many pull requests there were.
 
-description: Calculates the outside contribution metrics of a repo from its raw pull request data.
+count_commits(commits, options, now) is separate from compute_metrics, it
+counts the commits people made in the last options.commit_days days.
+
+description: Calculates the outside contribution and commit activity metrics of a repo from its raw data.
 """
 
 # NOTE: A pull request with both closed_by and closed_via empty counts as
@@ -33,7 +36,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from statistics import median
 
-from merge_hunt.domain.models import Actor, PullRequest
+from merge_hunt.domain.models import Actor, Commit, PullRequest
 
 # --- Associations ---
 
@@ -55,6 +58,7 @@ class MetricOptions:
     ignored_after_days: int = 30
     window_days: int = 180
     min_sample: int = 10
+    commit_days: int = 90
 
 # WITHDRAWN, BOT_CLOSED and OPEN stay out of the merge rate, none of them is a
 # maintainer's decision.
@@ -235,3 +239,22 @@ def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: dat
         responded=len(response_days),
         median_response_days=median(response_days) if enough else None,
     )
+
+# --- Commits ---
+
+# Bots are dropped here and not while fetching, so a name the user adds to
+# extra_bots later also clears the commits that are already stored.
+def count_commits(commits: Iterable[Commit], options: MetricOptions, now: datetime) -> int:
+    """Counts the commits people made in the last options.commit_days days.
+
+    Args:
+        commits: The commits on the repo's default branch, older ones are
+            skipped here.
+        options: The user's settings.
+        now: The moment the days are counted back from.
+
+    Returns:
+        The number of commits in the window, bot commits left out.
+    """
+    since = now - timedelta(days=options.commit_days)
+    return sum(1 for commit in commits if commit.committed_at >= since and not is_bot(commit.author, options))

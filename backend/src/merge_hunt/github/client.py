@@ -1,6 +1,6 @@
 """
 file: client.py
-importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, PullRequestHistory, GitHubAuthError, GitHubQueryError
+importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, PullRequestHistory, CommitHistory, GitHubAuthError, GitHubQueryError
 
 GitHubClient is the only place in the app that talks to GitHub. It is built
 with a TokenProvider and an httpx.AsyncClient, both passed in from outside.
@@ -13,10 +13,14 @@ the given time, newest first, and returns them as a PullRequestHistory. When
 the page limit stops it early, complete_since tells from which date on the
 data is complete.
 
+commits(owner, name, since) does the same for the commits on the default
+branch and returns a CommitHistory. Merge commits are left out, bot commits
+stay in and are only marked.
+
 Requests go out one at a time. When GitHub says the quota is used up, asks to
 slow down or fails for a moment, the client waits and tries again by itself.
-Before each wait it calls the on_wait function given to pull_requests with a
-RateLimitWait, or logs a warning if there is none.
+Before each wait it calls the on_wait function given to pull_requests or
+commits with a RateLimitWait, or logs a warning if there is none.
 
 description: Async client for the GitHub API.
 """
@@ -40,9 +44,15 @@ from enum import StrEnum
 
 import httpx
 
-from merge_hunt.domain.models import PullRequest
-from merge_hunt.github.parsing import parse_pull_request
-from merge_hunt.github.queries import INTERACTION_LIMIT, PAGE_SIZE, PULL_REQUESTS_QUERY
+from merge_hunt.domain.models import Commit, PullRequest
+from merge_hunt.github.parsing import parse_commit, parse_pull_request
+from merge_hunt.github.queries import (
+    COMMIT_PAGE_SIZE,
+    COMMITS_QUERY,
+    INTERACTION_LIMIT,
+    PULL_REQUEST_PAGE_SIZE,
+    PULL_REQUESTS_QUERY,
+)
 from merge_hunt.github.token import TokenProvider
 
 logger = logging.getLogger(__name__)
@@ -55,8 +65,9 @@ API_URL = "https://api.github.com"
 # version could change response shapes under us.
 API_VERSION = "2022-11-28"
 
-# Ten pages of fifty is five hundred pull requests and about twenty points. A
-# repo with more in its window is bigger than the ones this app looks for.
+# Ten pages of fifty is five hundred pull requests and about twenty points,
+# for commits it is a thousand commits and ten points. A repo with more in its
+# window is bigger than the ones this app looks for.
 MAX_PAGES = 10
 
 # Three waits per request, then the error goes up to the caller. Retrying
@@ -106,6 +117,12 @@ class RateLimitWait:
 @dataclass(frozen=True, slots=True)
 class PullRequestHistory:
     prs: tuple[PullRequest, ...]
+    complete_since: datetime
+
+# commits only holds commits made at or after complete_since.
+@dataclass(frozen=True, slots=True)
+class CommitHistory:
+    commits: tuple[Commit, ...]
     complete_since: datetime
 
 WaitListener = Callable[[RateLimitWait], Awaitable[None]]
@@ -276,7 +293,7 @@ class GitHubClient:
             variables = {
                 "owner": owner,
                 "name": name,
-                "pageSize": PAGE_SIZE,
+                "pageSize": PULL_REQUEST_PAGE_SIZE,
                 "interactions": INTERACTION_LIMIT,
                 "cursor": cursor,
             }
@@ -288,3 +305,59 @@ class GitHubClient:
                 return PullRequestHistory(tuple(prs), since)
             cursor = page["pageInfo"]["endCursor"]
         return PullRequestHistory(tuple(prs), prs[-1].created_at if prs else since)
+
+    # GitHub already cuts the history at since, so paging only stops at the
+    # last page or at MAX_PAGES. Merge commits are dropped here and not in
+    # parsing.py, but the last commit fetched still sets complete_since when
+    # the limit is hit, merge or not. Otherwise a page ending in merge commits
+    # would claim the data goes back less far than it really does.
+    async def commits(
+        self,
+        owner: str,
+        name: str,
+        since: datetime,
+        on_wait: WaitListener | None = None,
+    ) -> CommitHistory:
+        """Fetches the commits on a repo's default branch since the given time.
+
+        Args:
+            owner: The user or organization that owns the repo.
+            name: The repo name.
+            since: Start of the window, timezone aware.
+            on_wait: Called before every wait caused by a limit or a server
+                error. When missing, waits are logged as warnings.
+
+        Returns:
+            The commits made at or after complete_since, newest first, without
+            merge commits. Empty when the repo has no default branch.
+            complete_since equals since unless the page limit was reached.
+
+        Raises:
+            GitHubAuthError: The token was rejected.
+            GitHubQueryError: GitHub could not answer, for example the repo does not exist.
+            httpx.HTTPStatusError: GitHub kept failing after every retry.
+        """
+        commits: list[Commit] = []
+        cursor = None
+        oldest = since
+        for _ in range(MAX_PAGES):
+            variables = {
+                "owner": owner,
+                "name": name,
+                "since": since.isoformat(),
+                "pageSize": COMMIT_PAGE_SIZE,
+                "cursor": cursor,
+            }
+            branch = (await self._graphql(COMMITS_QUERY, variables, on_wait))["repository"]["defaultBranchRef"]
+            if branch is None:
+                return CommitHistory((), since)
+            page = branch["target"]["history"]
+            for node in page["nodes"]:
+                commit = parse_commit(node)
+                oldest = commit.committed_at
+                if node["parents"]["totalCount"] < 2:
+                    commits.append(commit)
+            if not page["pageInfo"]["hasNextPage"]:
+                return CommitHistory(tuple(commits), since)
+            cursor = page["pageInfo"]["endCursor"]
+        return CommitHistory(tuple(commits), oldest)

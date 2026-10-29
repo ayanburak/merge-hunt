@@ -1,11 +1,15 @@
 """
 file: queries.py
-importable: PULL_REQUESTS_QUERY, PAGE_SIZE, INTERACTION_LIMIT
+importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, INTERACTION_LIMIT
 
 GraphQL query texts sent to GitHub. PULL_REQUESTS_QUERY returns one page of a
 repo's pull requests, newest first, with everything parsing.py needs to build
 a PullRequest. It takes owner, name, pageSize, interactions and cursor as
 variables, cursor is left empty for the first page.
+
+COMMITS_QUERY returns one page of the commits on a repo's default branch since
+a given time, newest first. It takes owner, name, since, pageSize and cursor.
+defaultBranchRef comes back empty for a repo that has no commits at all.
 
 description: The GraphQL queries the app sends to GitHub.
 """
@@ -14,7 +18,11 @@ description: The GraphQL queries the app sends to GitHub.
 
 # Fifty pull requests with thirty comments and thirty reviews each stays far
 # from GitHub's timeout and costs about two points of the hourly quota.
-PAGE_SIZE = 50
+PULL_REQUEST_PAGE_SIZE = 50
+
+# A commit node is small, so GitHub's own maximum is used. A page took one to
+# three seconds and one point of the quota when this was measured.
+COMMIT_PAGE_SIZE = 100
 
 # Comments arrive oldest first and the first maintainer response is almost
 # always among the first few. A pull request where a maintainer only writes
@@ -74,6 +82,42 @@ query ($owner: String!, $name: String!, $pageSize: Int!, $interactions: Int!, $c
               }
               closer {
                 __typename
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+# GitHub applies since on its side and compares it with the committed date, so
+# every node that comes back is already inside the window. parents is asked
+# for so client.py can drop merge commits. The git author name is asked for
+# next to the account because the account is empty when the commit email is
+# not linked to anyone, and parsing.py then looks at the name for [bot].
+COMMITS_QUERY = """
+query ($owner: String!, $name: String!, $since: GitTimestamp!, $pageSize: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      target {
+        ... on Commit {
+          history(first: $pageSize, after: $cursor, since: $since) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              committedDate
+              parents {
+                totalCount
+              }
+              author {
+                name
+                user {
+                  login
+                }
               }
             }
           }

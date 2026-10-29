@@ -1,8 +1,8 @@
 """
 file: models.py
-importable: Actor, Interaction, PullRequest, CloseSource
+importable: Actor, Interaction, PullRequest, CloseSource, Commit
 
-Raw pull request data, kept the way GitHub reported it. Nothing in here is
+Raw pull request and commit data, kept the way GitHub reported it. Nothing in here is
 computed, the enrichment step fills these from GitHub responses and the
 functions in metrics.py read them. Who did what is always kept next to when it
 happened, so a change in the user's settings, like a new name in the bot list,
@@ -12,7 +12,7 @@ Every class is frozen, an object can not be changed after it is built, and
 lists inside are tuples for the same reason. All datetimes are expected to be
 timezone aware and in UTC.
 
-description: Raw pull request data that the metrics are calculated from.
+description: Raw pull request and commit data that the metrics are calculated from.
 """
 
 # NOTE: Associations are kept as plain strings and not as an enum. GitHub has
@@ -63,3 +63,12 @@ class PullRequest:
     closed_by: Actor | None = None
     closed_via: CloseSource | None = None
     interactions: tuple[Interaction, ...] = ()
+
+# One commit on the default branch. Merge commits never get here, they only
+# record that a pull request was joined and carry no work of their own. Bot
+# commits are kept and only marked, so a name the user adds to the bot list
+# later still drops them from old data.
+@dataclass(frozen=True, slots=True)
+class Commit:
+    author: Actor
+    committed_at: datetime

@@ -2,15 +2,15 @@
 file: test_parsing.py
 
 Tests for github/parsing.py. The nodes are written by hand in the shape
-PULL_REQUESTS_QUERY returns, so nothing here talks to GitHub.
+PULL_REQUESTS_QUERY and COMMITS_QUERY return, so nothing here talks to GitHub.
 
-description: Checks that GitHub's pull request nodes become the right PullRequest objects.
+description: Checks that GitHub's pull request and commit nodes become the right domain objects.
 """
 
 from datetime import UTC, datetime
 
 from merge_hunt.domain.models import Actor, CloseSource, Interaction
-from merge_hunt.github.parsing import GHOST, parse_pull_request
+from merge_hunt.github.parsing import GHOST, parse_commit, parse_pull_request
 
 # --- Helpers ---
 
@@ -104,3 +104,29 @@ def test_closed_without_event_leaves_closer_empty():
 def test_open_pull_request_ignores_old_closed_event():
     pr = parse_pull_request(make_node(timelineItems=closed_event(account("maya"))))
     assert (pr.closed_by, pr.closed_via) == (None, None)
+
+# --- Commits ---
+
+# A commit by a linked user account, the shape one item of history.nodes has.
+def commit_node(name: str = "alice", login: str | None = "alice") -> dict:
+    return {
+        "committedDate": "2026-10-20T11:36:16Z",
+        "parents": {"totalCount": 1},
+        "author": {"name": name, "user": {"login": login} if login else None},
+    }
+
+def test_commit_reads_author_and_time_as_utc():
+    commit = parse_commit(commit_node())
+    assert commit.author == Actor("alice", False)
+    assert commit.committed_at == datetime(2026, 10, 20, 11, 36, 16, tzinfo=UTC)
+
+def test_commit_bot_login_marks_bot():
+    commit = parse_commit(commit_node("dependabot[bot]", "dependabot[bot]"))
+    assert commit.author == Actor("dependabot[bot]", True)
+
+def test_commit_without_account_becomes_ghost():
+    assert parse_commit(commit_node("Jane Doe", None)).author == GHOST
+
+def test_commit_without_account_but_bot_name_is_bot():
+    commit = parse_commit(commit_node("renovate[bot]", None))
+    assert commit.author == Actor("ghost", True)

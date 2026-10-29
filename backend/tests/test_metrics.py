@@ -5,7 +5,7 @@ Tests for domain/metrics.py, one test per approved case. The numbers in the
 compute_metrics tests are the examples the definitions were agreed on, so a
 failure here means the code no longer matches the design.
 
-description: Checks every metric rule against fixed pull requests and a fixed now.
+description: Checks every metric rule against fixed pull requests, fixed commits and a fixed now.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -16,12 +16,13 @@ from merge_hunt.domain.metrics import (
     MetricOptions,
     Outcome,
     compute_metrics,
+    count_commits,
     first_response_at,
     is_bot,
     is_external,
     outcome,
 )
-from merge_hunt.domain.models import Actor, CloseSource, Interaction, PullRequest
+from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, PullRequest
 
 # --- Helpers ---
 
@@ -222,3 +223,26 @@ def test_compute_late_first_response_still_ignored():
     )
     metrics = compute_metrics([pr], OPTIONS, NOW)
     assert (metrics.ignored, metrics.evaluable) == (1, 1)
+
+# --- count_commits ---
+
+def commit(days: float, author: Actor = AUTHOR) -> Commit:
+    return Commit(author=author, committed_at=days_ago(days))
+
+def test_count_commits_skips_bots():
+    commits = [commit(5), commit(6, Actor("dependabot[bot]", True)), commit(7)]
+    assert count_commits(commits, OPTIONS, NOW) == 2
+
+def test_count_commits_respects_extra_bots():
+    options = MetricOptions(extra_bots=frozenset({"Release-Helper"}))
+    commits = [commit(5), commit(6, Actor("release-helper", False))]
+    assert count_commits(commits, options, NOW) == 1
+
+# Exactly commit_days ago is still inside, a minute earlier is not.
+def test_count_commits_only_counts_last_commit_days():
+    edge = OPTIONS.commit_days
+    commits = [commit(1), commit(edge), commit(edge + 1 / (24 * 60))]
+    assert count_commits(commits, OPTIONS, NOW) == 2
+
+def test_count_commits_with_no_commits_is_zero():
+    assert count_commits([], OPTIONS, NOW) == 0

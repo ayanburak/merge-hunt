@@ -1,9 +1,10 @@
 """
 file: parsing.py
-importable: parse_pull_request, GHOST
+importable: parse_pull_request, parse_commit, GHOST
 
 parse_pull_request turns one pull request node from PULL_REQUESTS_QUERY into
-a PullRequest. It does no network work and no filtering, the window and the
+a PullRequest, parse_commit turns one commit node from COMMITS_QUERY into a
+Commit. It does no network work and no filtering, the window and the
 bot rules are applied later by the caller and by metrics.py.
 
 description: Converts GitHub's GraphQL answers into domain objects.
@@ -16,7 +17,7 @@ description: Converts GitHub's GraphQL answers into domain objects.
 
 from datetime import datetime
 
-from merge_hunt.domain.models import Actor, CloseSource, Interaction, PullRequest
+from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, PullRequest
 
 # --- Accounts ---
 
@@ -86,3 +87,30 @@ def parse_pull_request(node: dict) -> PullRequest:
         closed_via=closed_via,
         interactions=tuple(comments + reviews),
     )
+
+# --- Commits ---
+
+# On a commit GitHub returns even a bot as a User, dependabot comes back as
+# dependabot[bot] with the User type. So unlike pull requests the [bot] at the
+# end of the name decides. When the commit email is not linked to any account
+# user is empty, then git's own author name is the only hint left.
+def _commit_author(node: dict | None) -> Actor:
+    if node is None:
+        return GHOST
+    user = node["user"]
+    if user is None:
+        return Actor(login=GHOST.login, is_bot=(node["name"] or "").endswith("[bot]"))
+    return Actor(login=user["login"], is_bot=user["login"].endswith("[bot]"))
+
+def parse_commit(node: dict) -> Commit:
+    """Builds a Commit from one node of COMMITS_QUERY.
+
+    It does not look at parents, skipping merge commits is up to the caller.
+
+    Args:
+        node: A single item of history.nodes, as GitHub returned it.
+
+    Returns:
+        The commit with its author and the time it landed on the branch.
+    """
+    return Commit(author=_commit_author(node["author"]), committed_at=_time(node["committedDate"]))

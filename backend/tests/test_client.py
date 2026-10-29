@@ -5,7 +5,7 @@ Tests for github/client.py. Requests never leave the machine, httpx's
 MockTransport hands every request to a function in the test that decides the
 answer. Waits are recorded by a fake sleep and take no time.
 
-description: Checks paging, error handling and the wait and retry rules of GitHubClient.
+description: Checks paging of pull requests and commits, error handling and the wait and retry rules of GitHubClient.
 """
 
 import asyncio
@@ -25,7 +25,7 @@ from merge_hunt.github.client import (
     RateLimitWait,
     WaitReason,
 )
-from merge_hunt.github.queries import PAGE_SIZE
+from merge_hunt.github.queries import COMMIT_PAGE_SIZE, PULL_REQUEST_PAGE_SIZE
 from merge_hunt.github.token import StaticTokenProvider
 
 # --- Helpers ---
@@ -109,13 +109,71 @@ def test_short_history_is_complete():
 
 # Every page is full and still inside the window, so only the page limit stops it.
 def test_page_limit_marks_where_data_is_complete():
-    dates = [SINCE + timedelta(days=170, minutes=-i) for i in range(PAGE_SIZE * MAX_PAGES)]
-    pages = [page(dates[i:i + PAGE_SIZE], has_next=True) for i in range(0, len(dates), PAGE_SIZE)]
+    dates = [SINCE + timedelta(days=170, minutes=-i) for i in range(PULL_REQUEST_PAGE_SIZE * MAX_PAGES)]
+    pages = [page(dates[i:i + PULL_REQUEST_PAGE_SIZE], has_next=True) for i in range(0, len(dates), PULL_REQUEST_PAGE_SIZE)]
     handler, seen = scripted(*pages)
     history = run(handler, fetch)
     assert len(seen) == MAX_PAGES
-    assert len(history.prs) == PAGE_SIZE * MAX_PAGES
+    assert len(history.prs) == PULL_REQUEST_PAGE_SIZE * MAX_PAGES
     assert history.complete_since == dates[-1]
+
+# --- Commits ---
+
+def commit_node(committed_at: datetime, parents: int = 1) -> dict:
+    return {
+        "committedDate": committed_at.isoformat().replace("+00:00", "Z"),
+        "parents": {"totalCount": parents},
+        "author": {"name": "alice", "user": {"login": "alice"}},
+    }
+
+# nodes is a list of (date, parent count) pairs, newest first like GitHub.
+def commit_page(nodes: list[tuple[datetime, int]], has_next: bool, cursor: str = "next") -> httpx.Response:
+    history = {
+        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+        "nodes": [commit_node(day, parents) for day, parents in nodes],
+    }
+    data = {"repository": {"defaultBranchRef": {"target": {"history": history}}}}
+    return httpx.Response(200, json={"data": data})
+
+def fetch_commits(client: GitHubClient):
+    return client.commits("owner", "repo", SINCE)
+
+def test_commits_skip_merge_commits():
+    handler, _ = scripted(commit_page([(SINCE + timedelta(days=9), 2), (SINCE + timedelta(days=8), 1)], has_next=False))
+    history = run(handler, fetch_commits)
+    assert [commit.committed_at for commit in history.commits] == [SINCE + timedelta(days=8)]
+
+def test_commits_follow_pages_to_the_end():
+    handler, seen = scripted(
+        commit_page([(SINCE + timedelta(days=20), 1)], has_next=True, cursor="c1"),
+        commit_page([(SINCE + timedelta(days=2), 1)], has_next=False),
+    )
+    history = run(handler, fetch_commits)
+    assert len(seen) == 2
+    assert seen[0]["variables"]["since"] == SINCE.isoformat()
+    assert seen[0]["variables"]["pageSize"] == COMMIT_PAGE_SIZE
+    assert seen[0]["variables"]["cursor"] is None
+    assert seen[1]["variables"]["cursor"] == "c1"
+    assert len(history.commits) == 2
+    assert history.complete_since == SINCE
+
+# The last commit of the last allowed page is a merge commit. It is not kept,
+# but the data still reaches back to it.
+def test_commits_page_limit_counts_skipped_commits():
+    dates = [SINCE + timedelta(days=80, minutes=-i) for i in range(COMMIT_PAGE_SIZE * MAX_PAGES)]
+    nodes = [(day, 2 if day == dates[-1] else 1) for day in dates]
+    pages = [commit_page(nodes[i:i + COMMIT_PAGE_SIZE], has_next=True) for i in range(0, len(nodes), COMMIT_PAGE_SIZE)]
+    handler, seen = scripted(*pages)
+    history = run(handler, fetch_commits)
+    assert len(seen) == MAX_PAGES
+    assert len(history.commits) == COMMIT_PAGE_SIZE * MAX_PAGES - 1
+    assert history.complete_since == dates[-1]
+
+def test_repo_without_default_branch_has_no_commits():
+    handler, _ = scripted(httpx.Response(200, json={"data": {"repository": {"defaultBranchRef": None}}}))
+    history = run(handler, fetch_commits)
+    assert history.commits == ()
+    assert history.complete_since == SINCE
 
 # --- Errors ---
 
