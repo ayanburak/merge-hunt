@@ -39,7 +39,9 @@ ALICE = Actor("alice", False)
 MAYA = Actor("maya", False)
 
 # One of every shape the data can take: merged with a review, closed by a
-# commit, closed by a bot, open with a comment from a deleted account.
+# commit with labels, closed by a bot, open with a comment from a deleted
+# account. The commits reach less far back than asked, like after the page
+# limit, so the two dates coming back the same proves both are stored.
 def sample_prs() -> PullRequestHistory:
     day = timedelta(days=1)
     return PullRequestHistory(
@@ -48,11 +50,15 @@ def sample_prs() -> PullRequestHistory:
                 4, ALICE, "NONE", AT - 2 * day, merged_at=AT - day, closed_at=AT - day, closed_by=MAYA,
                 interactions=(Interaction(MAYA, "MEMBER", AT - 1.5 * day), Interaction(Actor("bot", True), "NONE", AT - 1.2 * day)),
             ),
-            PullRequest(3, ALICE, "CONTRIBUTOR", AT - 10 * day, closed_at=AT - 9 * day, closed_by=MAYA, closed_via=CloseSource.COMMIT),
+            PullRequest(
+                3, ALICE, "CONTRIBUTOR", AT - 10 * day, closed_at=AT - 9 * day, closed_by=MAYA, closed_via=CloseSource.COMMIT,
+                labels=("rejected AI", "docs"),
+            ),
             PullRequest(2, Actor("dependabot", True), "NONE", AT - 20 * day, closed_at=AT - 5 * day, closed_by=Actor("stale", True)),
             PullRequest(1, ALICE, "FIRST_TIME_CONTRIBUTOR", AT - 30 * day, interactions=(Interaction(Actor("ghost", False), "NONE", AT - 29 * day),)),
         ),
         complete_since=SINCE,
+        requested_since=SINCE,
     )
 
 def sample_commits() -> CommitHistory:
@@ -62,7 +68,8 @@ def sample_commits() -> CommitHistory:
             Commit(Actor("dependabot[bot]", True), AT - timedelta(days=4)),
             Commit(Actor("ghost", True), AT - timedelta(days=8)),
         ),
-        complete_since=AT - timedelta(days=90),
+        complete_since=AT - timedelta(days=80),
+        requested_since=AT - timedelta(days=90),
     )
 
 # Runs body with a store on a fresh in-memory database and throws the
@@ -112,11 +119,11 @@ def test_times_come_back_utc_aware():
 # The second fetch has a single pull request without interactions, so any
 # interaction left in the table would be a leftover of the first one.
 def test_saving_again_replaces_old_data():
-    newer = PullRequestHistory((PullRequest(9, ALICE, "NONE", AT),), SINCE)
+    newer = PullRequestHistory((PullRequest(9, ALICE, "NONE", AT),), SINCE, SINCE)
 
     async def body(store, engine):
         await save_sample(store)
-        await store.save_enrichment(REPO_ID, newer, CommitHistory((), SINCE), AT + timedelta(days=7))
+        await store.save_enrichment(REPO_ID, newer, CommitHistory((), SINCE, SINCE), AT + timedelta(days=7))
         loaded = await store.load_enrichment(REPO_ID)
         return loaded, await count(engine, PullRequestRow), await count(engine, InteractionRow), await count(engine, CommitRow)
 
@@ -148,12 +155,12 @@ def test_unenriched_repo_loads_none():
 # through the write, after the old rows were already deleted in the same
 # transaction.
 def test_failed_save_keeps_old_data():
-    broken = PullRequestHistory((PullRequest(5, ALICE, "NONE", AT), PullRequest(5, ALICE, "NONE", AT)), SINCE)
+    broken = PullRequestHistory((PullRequest(5, ALICE, "NONE", AT), PullRequest(5, ALICE, "NONE", AT)), SINCE, SINCE)
 
     async def body(store, _):
         await save_sample(store)
         with pytest.raises(IntegrityError):
-            await store.save_enrichment(REPO_ID, broken, CommitHistory((), SINCE), AT + timedelta(days=7))
+            await store.save_enrichment(REPO_ID, broken, CommitHistory((), SINCE, SINCE), AT + timedelta(days=7))
         return await store.load_enrichment(REPO_ID)
 
     loaded = run(body)

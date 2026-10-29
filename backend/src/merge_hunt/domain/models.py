@@ -1,6 +1,6 @@
 """
 file: models.py
-importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment
+importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment, RepoRef
 
 Raw pull request and commit data, kept the way GitHub reported it. Nothing in here is
 computed, the enrichment step fills these from GitHub responses and the
@@ -13,8 +13,10 @@ lists inside are tuples for the same reason. All datetimes are expected to be
 timezone aware and in UTC.
 
 PullRequestHistory and CommitHistory are what one fetch brings back, the data
-together with the date from which it is complete. Enrichment is both of them
-as the database gives them back, with the time they were fetched.
+together with the date it was asked from and the date from which it is
+complete. Enrichment is both of them as the database gives them back, with
+the time they were fetched. RepoRef points at one repo on GitHub, it is what
+the enrichment step is given to work on.
 
 description: Raw pull request and commit data that the metrics are calculated from.
 """
@@ -56,6 +58,8 @@ class Interaction:
 
 # A merged pull request also has closed_at set, GitHub closes it while merging.
 # Who merged it is left out on purpose, a merge is always a maintainer's call.
+# labels only holds label names, metrics.py drops pull requests carrying one of
+# the labels the user excluded, spam closes for example.
 @dataclass(frozen=True, slots=True)
 class PullRequest:
     number: int
@@ -67,6 +71,7 @@ class PullRequest:
     closed_by: Actor | None = None
     closed_via: CloseSource | None = None
     interactions: tuple[Interaction, ...] = ()
+    labels: tuple[str, ...] = ()
 
 # One commit on the default branch. Merge commits never get here, they only
 # record that a pull request was joined and carry no work of their own. Bot
@@ -79,17 +84,31 @@ class Commit:
 
 # --- Fetched Data ---
 
+# id is GitHub's numeric repo id. It stays the same when a repo is renamed or
+# moved, owner and name do not.
+@dataclass(frozen=True, slots=True)
+class RepoRef:
+    id: int
+    owner: str
+    name: str
+
+# requested_since is where the fetch was asked to start. complete_since is
+# later than that only when the page limit stopped the fetch early, and the
+# enrichment step needs both to tell a cut fetch from a too narrow one.
 # prs only holds pull requests opened at or after complete_since.
 @dataclass(frozen=True, slots=True)
 class PullRequestHistory:
     prs: tuple[PullRequest, ...]
     complete_since: datetime
+    requested_since: datetime
 
-# commits only holds commits made at or after complete_since.
+# Same as PullRequestHistory, commits only holds commits made at or after
+# complete_since.
 @dataclass(frozen=True, slots=True)
 class CommitHistory:
     commits: tuple[Commit, ...]
     complete_since: datetime
+    requested_since: datetime
 
 # Pull requests and commits are always fetched and saved together, so a single
 # enriched_at covers both. Each keeps its own complete_since because their

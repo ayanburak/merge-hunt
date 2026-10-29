@@ -50,6 +50,7 @@ def node(created_at: datetime) -> dict:
         "author": {"__typename": "User", "login": "alice"},
         "comments": {"nodes": []},
         "reviews": {"nodes": []},
+        "labels": {"nodes": []},
         "timelineItems": {"nodes": []},
     }
 
@@ -116,6 +117,7 @@ def test_page_limit_marks_where_data_is_complete():
     assert len(seen) == MAX_PAGES
     assert len(history.prs) == PULL_REQUEST_PAGE_SIZE * MAX_PAGES
     assert history.complete_since == dates[-1]
+    assert history.requested_since == SINCE
 
 # --- Commits ---
 
@@ -168,6 +170,7 @@ def test_commits_page_limit_counts_skipped_commits():
     assert len(seen) == MAX_PAGES
     assert len(history.commits) == COMMIT_PAGE_SIZE * MAX_PAGES - 1
     assert history.complete_since == dates[-1]
+    assert history.requested_since == SINCE
 
 def test_repo_without_default_branch_has_no_commits():
     handler, _ = scripted(httpx.Response(200, json={"data": {"repository": {"defaultBranchRef": None}}}))

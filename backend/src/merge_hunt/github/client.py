@@ -1,10 +1,12 @@
 """
 file: client.py
-importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, GitHubAuthError, GitHubQueryError
+importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, GitHubAuthError, GitHubQueryError, HTTP_TIMEOUT
 
 GitHubClient is the only place in the app that talks to GitHub. It is built
 with a TokenProvider and an httpx.AsyncClient, both passed in from outside.
 The caller owns the httpx client and closes it, GitHubClient never does.
+It should be opened with timeout=HTTP_TIMEOUT, httpx's own default is too
+short for a GraphQL page.
 rate_limit() reports the remaining request quota and does not use any of it,
 so it is also the cheapest way to check that a token works.
 
@@ -51,6 +53,7 @@ from merge_hunt.github.queries import (
     COMMIT_PAGE_SIZE,
     COMMITS_QUERY,
     INTERACTION_LIMIT,
+    LABEL_LIMIT,
     PULL_REQUEST_PAGE_SIZE,
     PULL_REQUESTS_QUERY,
 )
@@ -65,6 +68,12 @@ API_URL = "https://api.github.com"
 # GitHub asks clients to pin the API version, without it a future default
 # version could change response shapes under us.
 API_VERSION = "2022-11-28"
+
+# Seconds. A page of fifty pull requests took about five seconds when it was
+# measured, exactly httpx's default limit. GitHub itself gives up on a query
+# after ten seconds, so thirty leaves plenty of room and never cuts a request
+# GitHub would still have answered.
+HTTP_TIMEOUT = 30.0
 
 # Ten pages of fifty is five hundred pull requests and about twenty points,
 # for commits it is a thousand commits and ten points. A repo with more in its
@@ -284,6 +293,7 @@ class GitHubClient:
                 "name": name,
                 "pageSize": PULL_REQUEST_PAGE_SIZE,
                 "interactions": INTERACTION_LIMIT,
+                "labels": LABEL_LIMIT,
                 "cursor": cursor,
             }
             page = (await self._graphql(PULL_REQUESTS_QUERY, variables, on_wait))["repository"]["pullRequests"]
@@ -291,9 +301,9 @@ class GitHubClient:
             prs.extend(pr for pr in batch if pr.created_at >= since)
             passed_window = bool(batch) and batch[-1].created_at < since
             if passed_window or not page["pageInfo"]["hasNextPage"]:
-                return PullRequestHistory(tuple(prs), since)
+                return PullRequestHistory(tuple(prs), since, since)
             cursor = page["pageInfo"]["endCursor"]
-        return PullRequestHistory(tuple(prs), prs[-1].created_at if prs else since)
+        return PullRequestHistory(tuple(prs), prs[-1].created_at if prs else since, since)
 
     # GitHub already cuts the history at since, so paging only stops at the
     # last page or at MAX_PAGES. Merge commits are dropped here and not in
@@ -339,7 +349,7 @@ class GitHubClient:
             }
             branch = (await self._graphql(COMMITS_QUERY, variables, on_wait))["repository"]["defaultBranchRef"]
             if branch is None:
-                return CommitHistory((), since)
+                return CommitHistory((), since, since)
             page = branch["target"]["history"]
             for node in page["nodes"]:
                 commit = parse_commit(node)
@@ -347,6 +357,6 @@ class GitHubClient:
                 if node["parents"]["totalCount"] < 2:
                     commits.append(commit)
             if not page["pageInfo"]["hasNextPage"]:
-                return CommitHistory(tuple(commits), since)
+                return CommitHistory(tuple(commits), since, since)
             cursor = page["pageInfo"]["endCursor"]
-        return CommitHistory(tuple(commits), oldest)
+        return CommitHistory(tuple(commits), oldest, since)

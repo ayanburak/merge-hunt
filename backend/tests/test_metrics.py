@@ -8,6 +8,7 @@ failure here means the code no longer matches the design.
 description: Checks every metric rule against fixed pull requests, fixed commits and a fixed now.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -108,6 +109,10 @@ def test_outcome_maintainer_close_is_rejected():
 def test_outcome_author_close_is_withdrawn():
     pr = make_pr(closed_at=days_ago(50), closed_by=AUTHOR)
     assert outcome(pr, OPTIONS) is Outcome.WITHDRAWN
+
+# GitHub hid the closed event, in pallets/click the author had closed these.
+def test_outcome_close_without_closer_is_withdrawn():
+    assert outcome(make_pr(closed_at=days_ago(50)), OPTIONS) is Outcome.WITHDRAWN
 
 def test_outcome_bot_close_is_bot_closed():
     assert outcome(make_pr(closed_at=days_ago(50), closed_by=STALE_BOT), OPTIONS) is Outcome.BOT_CLOSED
@@ -223,6 +228,16 @@ def test_compute_late_first_response_still_ignored():
     )
     metrics = compute_metrics([pr], OPTIONS, NOW)
     assert (metrics.ignored, metrics.evaluable) == (1, 1)
+
+# The spam close would have been a rejection and a response within a day.
+def test_compute_skips_excluded_labels_ignoring_case():
+    prs = [quick_merge(), replace(rejected_after(0.1), labels=("Rejected AI",))]
+    metrics = compute_metrics(prs, MetricOptions(min_sample=1), NOW)
+    assert (metrics.accepted, metrics.rejected, metrics.responded) == (1, 0, 1)
+
+def test_compute_keeps_labels_not_excluded():
+    pr = replace(rejected_after(5), labels=("wontfix",))
+    assert compute_metrics([pr], OPTIONS, NOW).rejected == 1
 
 # --- count_commits ---
 

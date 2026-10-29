@@ -23,7 +23,8 @@ from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, Pu
 
 # GraphQL can return an empty account where the person deleted their profile.
 # It is filled with GitHub's own ghost account so closed_by only stays empty
-# when there was no closed event at all.
+# when there was no closed event at all. That happens too, GitHub hides the
+# closed event of some accounts, most likely the ones it flagged as spam.
 GHOST = Actor(login="ghost", is_bot=False)
 
 _CLOSERS = {
@@ -64,7 +65,8 @@ def parse_pull_request(node: dict) -> PullRequest:
         node: A single item of pullRequests.nodes, as GitHub returned it.
 
     Returns:
-        The pull request with its comments and submitted reviews as interactions.
+        The pull request with its comments and submitted reviews as
+        interactions and its label names.
     """
     comments = [
         Interaction(_actor(item["author"]), item["authorAssociation"], _time(item["createdAt"]))
@@ -86,6 +88,7 @@ def parse_pull_request(node: dict) -> PullRequest:
         closed_by=closed_by,
         closed_via=closed_via,
         interactions=tuple(comments + reviews),
+        labels=tuple(item["name"] for item in node["labels"]["nodes"]),
     )
 
 # --- Commits ---

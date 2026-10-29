@@ -59,6 +59,7 @@ def _pull_request_row(repo_id: int, pr: PullRequest) -> PullRequestRow:
         closed_by_login=pr.closed_by.login if pr.closed_by else None,
         closed_by_is_bot=pr.closed_by.is_bot if pr.closed_by else None,
         closed_via=pr.closed_via,
+        labels=list(pr.labels),
         interactions=[
             InteractionRow(actor_login=item.actor.login, actor_is_bot=item.actor.is_bot, association=item.association, at=item.at)
             for item in pr.interactions
@@ -88,6 +89,7 @@ def _pull_request(row: PullRequestRow) -> PullRequest:
         closed_by=Actor(row.closed_by_login, row.closed_by_is_bot) if row.closed_by_login is not None else None,
         closed_via=CloseSource(row.closed_via) if row.closed_via is not None else None,
         interactions=tuple(Interaction(Actor(item.actor_login, item.actor_is_bot), item.association, item.at) for item in row.interactions),
+        labels=tuple(row.labels),
     )
 
 def _commit(row: CommitRow) -> Commit:
@@ -146,6 +148,8 @@ class RepoStore:
             repo.enriched_at = at
             repo.prs_complete_since = prs.complete_since
             repo.commits_complete_since = commits.complete_since
+            repo.prs_requested_since = prs.requested_since
+            repo.commits_requested_since = commits.requested_since
 
     # Interactions come in one extra query for all pull requests together,
     # loading them one pull request at a time would mean hundreds of queries.
@@ -172,6 +176,10 @@ class RepoStore:
             commit_rows = await session.scalars(select(CommitRow).where(CommitRow.repo_id == repo_id).order_by(CommitRow.id))
             return Enrichment(
                 enriched_at=repo.enriched_at,
-                prs=PullRequestHistory(tuple(_pull_request(row) for row in pr_rows), repo.prs_complete_since),
-                commits=CommitHistory(tuple(_commit(row) for row in commit_rows), repo.commits_complete_since),
+                prs=PullRequestHistory(
+                    tuple(_pull_request(row) for row in pr_rows), repo.prs_complete_since, repo.prs_requested_since
+                ),
+                commits=CommitHistory(
+                    tuple(_commit(row) for row in commit_rows), repo.commits_complete_since, repo.commits_requested_since
+                ),
             )

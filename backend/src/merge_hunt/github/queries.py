@@ -1,11 +1,11 @@
 """
 file: queries.py
-importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, INTERACTION_LIMIT
+importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, INTERACTION_LIMIT, LABEL_LIMIT
 
 GraphQL query texts sent to GitHub. PULL_REQUESTS_QUERY returns one page of a
 repo's pull requests, newest first, with everything parsing.py needs to build
-a PullRequest. It takes owner, name, pageSize, interactions and cursor as
-variables, cursor is left empty for the first page.
+a PullRequest. It takes owner, name, pageSize, interactions, labels and
+cursor as variables, cursor is left empty for the first page.
 
 COMMITS_QUERY returns one page of the commits on a repo's default branch since
 a given time, newest first. It takes owner, name, since, pageSize and cursor.
@@ -29,6 +29,10 @@ COMMIT_PAGE_SIZE = 100
 # after thirty other comments is missed and may count as ignored.
 INTERACTION_LIMIT = 30
 
+# Only label names are asked for, metrics.py looks for spam labels like
+# rejected AI among them. Ten leaves room for the usual topic labels next to it.
+LABEL_LIMIT = 10
+
 # --- Queries ---
 
 # Only the last closed event is asked for, a pull request can be closed,
@@ -36,7 +40,7 @@ INTERACTION_LIMIT = 30
 # Bots come without the [bot] suffix in GraphQL, so __typename is asked for
 # every account and parsing.py uses it to spot them.
 PULL_REQUESTS_QUERY = """
-query ($owner: String!, $name: String!, $pageSize: Int!, $interactions: Int!, $cursor: String) {
+query ($owner: String!, $name: String!, $pageSize: Int!, $interactions: Int!, $labels: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: $pageSize, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo {
@@ -71,6 +75,11 @@ query ($owner: String!, $name: String!, $pageSize: Int!, $interactions: Int!, $c
             }
             authorAssociation
             submittedAt
+          }
+        }
+        labels(first: $labels) {
+          nodes {
+            name
           }
         }
         timelineItems(itemTypes: [CLOSED_EVENT], last: 1) {

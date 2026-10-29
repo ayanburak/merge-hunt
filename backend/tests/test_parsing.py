@@ -29,6 +29,7 @@ def make_node(**fields) -> dict:
         "author": account("alice"),
         "comments": {"nodes": []},
         "reviews": {"nodes": []},
+        "labels": {"nodes": []},
         "timelineItems": {"nodes": []},
     }
     node.update(fields)
@@ -54,6 +55,10 @@ def test_bot_type_marks_account_as_bot():
 
 def test_missing_author_becomes_ghost():
     assert parse_pull_request(make_node(author=None)).author == GHOST
+
+def test_reads_label_names():
+    pr = parse_pull_request(make_node(labels={"nodes": [{"name": "rejected AI"}, {"name": "docs"}]}))
+    assert pr.labels == ("rejected AI", "docs")
 
 # --- Interactions ---
 

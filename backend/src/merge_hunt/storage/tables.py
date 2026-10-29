@@ -20,7 +20,7 @@ description: Database tables for repos and their raw pull request and commit dat
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -52,7 +52,9 @@ class Base(DeclarativeBase):
 
 # id is GitHub's own numeric repo id and not one made up here, so a renamed or
 # moved repo keeps its row and only owner and name change. The enrichment
-# columns stay empty until the repo is fetched for the first time.
+# columns stay empty until the repo is fetched for the first time. The
+# requested_since columns hold where each fetch was asked to start, the
+# complete_since ones where its data really starts.
 class RepoRow(Base):
     __tablename__ = "repos"
 
@@ -62,9 +64,13 @@ class RepoRow(Base):
     enriched_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     prs_complete_since: Mapped[datetime | None] = mapped_column(UtcDateTime)
     commits_complete_since: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    prs_requested_since: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    commits_requested_since: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 # Rows are read back ordered by id, which keeps the order they were saved in,
 # newest first like GitHub sent them. closed_via holds a CloseSource value.
+# labels is a JSON list of label names. Nothing searches by label in SQL, the
+# metrics filter them in Python, so a table of its own would only add a join.
 class PullRequestRow(Base):
     __tablename__ = "pull_requests"
     __table_args__ = (UniqueConstraint("repo_id", "number"),)
@@ -81,6 +87,7 @@ class PullRequestRow(Base):
     closed_by_login: Mapped[str | None]
     closed_by_is_bot: Mapped[bool | None]
     closed_via: Mapped[str | None]
+    labels: Mapped[list[str]] = mapped_column(JSON)
 
     # passive_deletes leaves removing interactions to the database cascade, so
     # deleting pull requests never has to load their interactions first.

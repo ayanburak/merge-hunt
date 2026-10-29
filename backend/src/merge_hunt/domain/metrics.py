@@ -20,11 +20,12 @@ counts the commits people made in the last options.commit_days days.
 description: Calculates the outside contribution and commit activity metrics of a repo from its raw data.
 """
 
-# NOTE: A pull request with both closed_by and closed_via empty counts as
-# rejected. A rejection is defined as a close by anyone other than the author
-# or a bot, and an unknown closer is neither as far as we can tell. Deleted
-# accounts should not end up here, the enrichment step will get them from
-# GitHub as the ghost account.
+# NOTE: A closed pull request with both closed_by and closed_via empty counts
+# as withdrawn. GitHub hides the closed event of some accounts, most likely the
+# ones it flagged as spam. In pallets/click thirteen pull requests came back
+# like this in October 2026, in seven the author wrote that they were closing
+# it themselves and none showed a maintainer closing it. Deleted accounts do
+# not end up here, parsing.py turns them into the ghost account.
 #
 # XXX: Because deleted accounts all share the ghost login, a pull request whose
 # author and closer were both deleted later looks like the author closed it and
@@ -51,10 +52,14 @@ _DAY = timedelta(days=1)
 
 # The defaults are what the UI starts with. Frozen like the models, so one
 # options object can be shared between calls without anyone changing it.
+# excluded_labels is compared without caring about case like extra_bots. A
+# pull request carrying one of them is left out of every metric, some repos
+# label and close a flood of spam that would bury the real rejections.
 @dataclass(frozen=True, slots=True)
 class MetricOptions:
     count_contributor_as_external: bool = False
     extra_bots: frozenset[str] = frozenset()
+    excluded_labels: frozenset[str] = frozenset({"spam", "invalid", "rejected AI"})
     ignored_after_days: int = 30
     window_days: int = 180
     min_sample: int = 10
@@ -120,15 +125,15 @@ def outcome(pr: PullRequest, options: MetricOptions) -> Outcome:
     """Decides how a pull request ended.
 
     A merge or a close by a commit or another pull request is ACCEPTED, a
-    close by the author is WITHDRAWN, a close by a bot is BOT_CLOSED and a
-    close by anyone else is REJECTED.
+    close by the author or by an account GitHub does not show is WITHDRAWN, a
+    close by a bot is BOT_CLOSED and a close by anyone else is REJECTED.
     """
     if pr.merged_at is not None or pr.closed_via is not None:
         return Outcome.ACCEPTED
     if pr.closed_at is None:
         return Outcome.OPEN
     if pr.closed_by is None:
-        return Outcome.REJECTED
+        return Outcome.WITHDRAWN
     if is_bot(pr.closed_by, options):
         return Outcome.BOT_CLOSED
     if pr.closed_by.login == pr.author.login:
@@ -166,6 +171,11 @@ def first_response_at(pr: PullRequest, options: MetricOptions) -> datetime | Non
 
 # --- Repo Metrics ---
 
+# Lowered on every call like extra_bots in is_bot, both lists are short.
+def _is_excluded(pr: PullRequest, options: MetricOptions) -> bool:
+    excluded = {label.lower() for label in options.excluded_labels}
+    return any(label.lower() in excluded for label in pr.labels)
+
 # Answers three ways. None keeps the pull request out of the ignored rate, that
 # is an open one younger than the limit or one closed before the limit without
 # a response. True and False both count as evaluable. The wait runs until the
@@ -192,11 +202,11 @@ def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: dat
     """Calculates the outside contribution metrics of one repo.
 
     Only external pull requests opened in the last options.window_days days
-    are counted.
+    and carrying none of options.excluded_labels are counted.
 
     Args:
-        prs: Every pull request of the repo, the ones outside the window or
-            not external are skipped here.
+        prs: Every pull request of the repo, the ones outside the window, not
+            external or with an excluded label are skipped here.
         options: The user's settings.
         now: The moment the open pull requests are measured against.
 
@@ -210,7 +220,7 @@ def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: dat
     response_days: list[float] = []
 
     for pr in prs:
-        if pr.created_at < since or not is_external(pr, options):
+        if pr.created_at < since or not is_external(pr, options) or _is_excluded(pr, options):
             continue
 
         result = outcome(pr, options)
