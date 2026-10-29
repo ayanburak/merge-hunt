@@ -9,6 +9,9 @@ callers never deal with sessions or transactions. Everything goes in and
 comes out as the classes of domain/models.py, the Row classes stay inside
 storage.
 
+load_repo only gives back repos discovery saw, a repo saved by save_repo
+alone has no stars or language to fill a Repo with.
+
 save_repo or save_repos has to run before save_enrichment, a repo's owner
 and name come from outside and the enrichment data alone can not create the
 row. save_repos keeps the enrichment data of a repo found again, save_repo
@@ -100,6 +103,23 @@ def _pull_request(row: PullRequestRow) -> PullRequest:
 def _commit(row: CommitRow) -> Commit:
     return Commit(author=Actor(row.author_login, row.author_is_bot), committed_at=row.committed_at)
 
+# Only called for a discovered row, where save_repos filled every column Repo
+# needs. topics is a JSON list in the row and a tuple in Repo.
+def _repo(row: RepoRow) -> Repo:
+    return Repo(
+        id=row.id,
+        owner=row.owner,
+        name=row.name,
+        stars=row.stars,
+        forks=row.forks,
+        language=row.language,
+        license=row.license,
+        topics=tuple(row.topics or ()),
+        open_issues=row.open_issues,
+        pushed_at=row.pushed_at,
+        latest_release_at=row.latest_release_at,
+    )
+
 # --- Store ---
 
 # The only door to the repo tables. No abstract class sits in front of it,
@@ -157,6 +177,23 @@ class RepoStore:
                         discovered_at=at,
                     )
                 )
+
+    # discovered_at is what tells a discovered row apart, save_repos always
+    # sets it and save_repo never does.
+    async def load_repo(self, id: int) -> Repo | None:
+        """Loads what discovery found out about a repo.
+
+        Args:
+            id: GitHub's numeric id of the repo.
+
+        Returns:
+            The repo, or None when it is unknown or was never discovered.
+        """
+        async with self._sessions() as session:
+            row = await session.get(RepoRow, id)
+            if row is None or row.discovered_at is None:
+                return None
+            return _repo(row)
 
     # Deleting the pull requests takes their interactions with them through
     # the database cascade, tables.py explains why that needs foreign_keys on.

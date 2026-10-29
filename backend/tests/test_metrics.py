@@ -77,21 +77,28 @@ def test_is_bot_normal_user():
 
 # --- is_external ---
 
+# Earlier merges only matter for a CONTRIBUTOR, so the other associations are
+# checked with several of them.
 @pytest.mark.parametrize("association", ["NONE", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER"])
 def test_is_external_outside_associations(association):
-    assert is_external(make_pr(association=association), OPTIONS)
+    assert is_external(make_pr(association=association), 5, OPTIONS)
 
 @pytest.mark.parametrize("association", ["OWNER", "MEMBER", "COLLABORATOR"])
 def test_is_external_team_associations(association):
-    assert not is_external(make_pr(association=association), OPTIONS)
+    assert not is_external(make_pr(association=association), 0, OPTIONS)
+
+def test_is_external_contributor_until_first_merge():
+    pr = make_pr(association="CONTRIBUTOR")
+    assert is_external(pr, 0, OPTIONS)
+    assert not is_external(pr, 1, OPTIONS)
 
 def test_is_external_contributor_follows_option():
     pr = make_pr(association="CONTRIBUTOR")
-    assert not is_external(pr, OPTIONS)
-    assert is_external(pr, MetricOptions(count_contributor_as_external=True))
+    assert not is_external(pr, 0, MetricOptions(external_until_merges=0))
+    assert is_external(pr, 2, MetricOptions(external_until_merges=3))
 
 def test_is_external_bot_author_is_not_external():
-    assert not is_external(make_pr(author=Actor("dependabot[bot]", True)), OPTIONS)
+    assert not is_external(make_pr(author=Actor("dependabot[bot]", True)), 0, OPTIONS)
 
 # --- outcome ---
 
@@ -238,6 +245,27 @@ def test_compute_skips_excluded_labels_ignoring_case():
 def test_compute_keeps_labels_not_excluded():
     pr = replace(rejected_after(5), labels=("wontfix",))
     assert compute_metrics([pr], OPTIONS, NOW).rejected == 1
+
+# GitHub shows someone whose first pull request was merged as CONTRIBUTOR on
+# that pull request too, it still has to count as an outside merge.
+def test_compute_first_merge_of_contributor_counts():
+    pr = replace(quick_merge(), author_association="CONTRIBUTOR")
+    assert compute_metrics([pr], OPTIONS, NOW).accepted == 1
+
+# The first merge lands ten days after opening. A pull request opened before
+# that is still from a newcomer, one opened after it is not.
+def test_compute_contributor_judged_by_merges_before_opening():
+    first = make_pr(days_ago(60), "CONTRIBUTOR", merged_at=days_ago(50), closed_at=days_ago(50), closed_by=MAINTAINER)
+    before = replace(rejected_after(5, days_ago(55)), author_association="CONTRIBUTOR")
+    after = replace(rejected_after(5, days_ago(40)), author_association="CONTRIBUTOR")
+    metrics = compute_metrics([first, before, after], OPTIONS, NOW)
+    assert (metrics.accepted, metrics.rejected) == (1, 1)
+
+def test_compute_contributor_merge_outside_window_still_counts():
+    old = replace(quick_merge(days_ago(300)), author_association="CONTRIBUTOR")
+    new = replace(rejected_after(5), author_association="CONTRIBUTOR")
+    metrics = compute_metrics([old, new], OPTIONS, NOW)
+    assert (metrics.accepted, metrics.rejected) == (0, 0)
 
 # --- count_commits ---
 

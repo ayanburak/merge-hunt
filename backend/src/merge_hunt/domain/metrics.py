@@ -5,7 +5,9 @@ importable: MetricOptions, Outcome, RepoMetrics, is_bot, is_external, outcome, f
 compute_metrics(prs, options, now) is the entry point, it takes the raw pull
 requests of one repo and returns a RepoMetrics. The smaller functions work on
 a single pull request and are public so the scoring step and the tests can use
-them directly. Nothing in here talks to GitHub or the database and the same
+them directly. is_external also needs how many of the author's pull requests
+were already accepted when this one was opened, compute_metrics works that
+out from the whole list. Nothing in here talks to GitHub or the database and the same
 input always gives the same output, that is why now is passed in and never
 read from the clock. now has to be timezone aware like the datetimes in
 models.py, comparing it with them fails otherwise.
@@ -20,6 +22,16 @@ counts the commits people made in the last options.commit_days days.
 description: Calculates the outside contribution and commit activity metrics of a repo from its raw data.
 """
 
+# NOTE: GitHub's author_association is the author's role today and not when
+# the pull request was opened. Someone whose first pull request got merged is
+# CONTRIBUTOR on that same pull request afterwards. In a trial with sixteen
+# repos in October 2026, 32 of 41 merged CONTRIBUTOR pull requests were the
+# author's first merge in the repo. That is why a CONTRIBUTOR is judged by the
+# merges that came before the pull request and not by the label alone. Only
+# the stored data is counted, so someone whose merges are all older than the
+# window looks new again, which is close enough for a person who has been away
+# that long.
+#
 # NOTE: A closed pull request with both closed_by and closed_via empty counts
 # as withdrawn. GitHub hides the closed event of some accounts, most likely the
 # ones it flagged as spam. In pallets/click thirteen pull requests came back
@@ -31,6 +43,8 @@ description: Calculates the outside contribution and commit activity metrics of 
 # author and closer were both deleted later looks like the author closed it and
 # counts as withdrawn. There is nothing in the data to tell them apart.
 
+from bisect import bisect_left
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -41,7 +55,7 @@ from merge_hunt.domain.models import Actor, Commit, PullRequest
 
 # --- Associations ---
 
-# CONTRIBUTOR is in neither set, MetricOptions decides which side it is on.
+# CONTRIBUTOR is in neither set, its earlier merges decide which side it is on.
 # Any value that is not listed counts as internal, models.py explains why.
 _EXTERNAL = frozenset({"NONE", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER"})
 _MAINTAINER = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
@@ -55,9 +69,12 @@ _DAY = timedelta(days=1)
 # excluded_labels is compared without caring about case like extra_bots. A
 # pull request carrying one of them is left out of every metric, some repos
 # label and close a flood of spam that would bury the real rejections.
+# external_until_merges is how many accepted pull requests a CONTRIBUTOR may
+# have had before this one and still count as external. 1 means only people
+# with no merge yet, 0 never counts a CONTRIBUTOR and a large number always does.
 @dataclass(frozen=True, slots=True)
 class MetricOptions:
-    count_contributor_as_external: bool = False
+    external_until_merges: int = 1
     extra_bots: frozenset[str] = frozenset()
     excluded_labels: frozenset[str] = frozenset({"spam", "invalid", "rejected AI"})
     ignored_after_days: int = 30
@@ -105,8 +122,15 @@ def is_bot(actor: Actor, options: MetricOptions) -> bool:
 
 # The bot check comes first, Dependabot and Renovate show up as NONE and would
 # pass as outside contributors otherwise.
-def is_external(pr: PullRequest, options: MetricOptions) -> bool:
+def is_external(pr: PullRequest, prior_merges: int, options: MetricOptions) -> bool:
     """Tells whether a pull request came from outside the project.
+
+    Args:
+        pr: The pull request.
+        prior_merges: How many of the author's pull requests in the same repo
+            had been accepted before this one was opened. Only matters for a
+            CONTRIBUTOR, GitHub labels the author by their role today.
+        options: The user's settings.
 
     Returns:
         True for a pull request opened by a person who is not part of the
@@ -115,7 +139,7 @@ def is_external(pr: PullRequest, options: MetricOptions) -> bool:
     if is_bot(pr.author, options):
         return False
     if pr.author_association == "CONTRIBUTOR":
-        return options.count_contributor_as_external
+        return prior_merges < options.external_until_merges
     return pr.author_association in _EXTERNAL
 
 # The order matters. closed_via is checked before the closer, because a commit
@@ -171,6 +195,19 @@ def first_response_at(pr: PullRequest, options: MetricOptions) -> datetime | Non
 
 # --- Repo Metrics ---
 
+# The time of an accept is the merge, or the close for a pull request closed
+# by a commit or another pull request. GitHub makes someone a CONTRIBUTOR at
+# that moment, so it is what the pull requests opened later are compared with.
+# The lists come back sorted for bisect.
+def _merge_times(prs: Iterable[PullRequest], options: MetricOptions) -> dict[str, list[datetime]]:
+    times: dict[str, list[datetime]] = defaultdict(list)
+    for pr in prs:
+        if outcome(pr, options) is Outcome.ACCEPTED:
+            times[pr.author.login].append(pr.merged_at or pr.closed_at)
+    for merges in times.values():
+        merges.sort()
+    return times
+
 # Lowered on every call like extra_bots in is_bot, both lists are short.
 def _is_excluded(pr: PullRequest, options: MetricOptions) -> bool:
     excluded = {label.lower() for label in options.excluded_labels}
@@ -197,7 +234,9 @@ def _rate(part: int, whole: int, min_sample: int) -> float | None:
 
 # Every metric is counted in one pass over the pull requests, so outcome and
 # first_response_at run once per pull request and all three metrics see the
-# same answer for it.
+# same answer for it. The merge times are gathered from every pull request
+# first, also the ones outside the window or with an excluded label, a merge is
+# a merge whatever else is going on.
 def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: datetime) -> RepoMetrics:
     """Calculates the outside contribution metrics of one repo.
 
@@ -206,7 +245,8 @@ def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: dat
 
     Args:
         prs: Every pull request of the repo, the ones outside the window, not
-            external or with an excluded label are skipped here.
+            external or with an excluded label are skipped here. All of them
+            still count as earlier merges of their author.
         options: The user's settings.
         now: The moment the open pull requests are measured against.
 
@@ -214,13 +254,18 @@ def compute_metrics(prs: Iterable[PullRequest], options: MetricOptions, now: dat
         The rates with the counts they were made from. A rate is None when
         its count is below options.min_sample.
     """
+    prs = tuple(prs)
     since = now - timedelta(days=options.window_days)
     limit = timedelta(days=options.ignored_after_days)
+    merges = _merge_times(prs, options)
     accepted = rejected = ignored = evaluable = 0
     response_days: list[float] = []
 
     for pr in prs:
-        if pr.created_at < since or not is_external(pr, options) or _is_excluded(pr, options):
+        if pr.created_at < since or _is_excluded(pr, options):
+            continue
+        prior = bisect_left(merges.get(pr.author.login, []), pr.created_at)
+        if not is_external(pr, prior, options):
             continue
 
         result = outcome(pr, options)

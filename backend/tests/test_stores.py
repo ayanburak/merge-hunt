@@ -4,7 +4,7 @@ file: test_stores.py
 Tests for the storage package. Every test gets a fresh SQLite database that
 lives only in memory, nothing is written to disk.
 
-description: Checks that RepoStore saves and loads enrichment data without losing or leaving anything.
+description: Checks that RepoStore saves and loads repos and enrichment data without losing or leaving anything.
 """
 
 import asyncio
@@ -214,3 +214,18 @@ def test_save_repo_keeps_discovery_fields():
         return await repo_row(engine)
 
     assert run(body) == ("pallets-eco", 16000, ["cli"], AT, None)
+
+def test_load_repo_round_trip():
+    async def body(store, _):
+        await store.save_repos([found_click()], AT)
+        return await store.load_repo(REPO_ID)
+
+    assert run(body) == found_click()
+
+# A row only Enricher wrote has no discovery fields, and an unknown id has no row.
+def test_load_repo_none_unless_discovered():
+    async def body(store, _):
+        await store.save_repo(REPO_ID, "pallets", "click")
+        return await store.load_repo(REPO_ID), await store.load_repo(1)
+
+    assert run(body) == (None, None)

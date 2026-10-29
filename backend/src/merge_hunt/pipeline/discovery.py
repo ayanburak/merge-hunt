@@ -2,10 +2,10 @@
 file: discovery.py
 importable: Discoverer, DiscoveryOptions, search_query, MAX_CANDIDATES
 
-Discoverer is the first station of the scan. It is built with a GitHubClient
+Discoverer is the first stage of the scan. It is built with a GitHubClient
 and a RepoStore, discover(options) turns the user's search settings into one
 GitHub repo search, saves the repos it finds and returns them as RepoRef
-objects, ready to be handed to Enricher. Linking the two stations is the scan
+objects, ready to be handed to Enricher. Linking the two stages is the scan
 job's work, Discoverer never starts an enrichment itself.
 
 At most options.max_candidates repos are kept, the most recently updated

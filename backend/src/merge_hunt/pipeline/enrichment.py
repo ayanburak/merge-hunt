@@ -2,7 +2,7 @@
 file: enrichment.py
 importable: Enricher, EnrichResult, EnrichStatus, ProgressListener, DEFAULT_MAX_AGE
 
-Enricher is the second station of the scan. It is built with a GitHubClient
+Enricher is the second stage of the scan. It is built with a GitHubClient
 and a RepoStore, enrich(repos, options) walks the given repos one by one,
 fetches their pull requests and commits from GitHub and saves them. A repo
 fetched less than max_age ago is skipped as long as that fetch reached as far
