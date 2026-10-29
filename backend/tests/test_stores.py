@@ -23,6 +23,7 @@ from merge_hunt.domain.models import (
     Interaction,
     PullRequest,
     PullRequestHistory,
+    Repo,
 )
 from merge_hunt.storage.database import create_engine, create_tables
 from merge_hunt.storage.stores import RepoStore
@@ -175,3 +176,41 @@ def test_tables_created_twice_is_safe():
         return await store.load_enrichment(REPO_ID)
 
     assert run(body).prs == sample_prs()
+
+# --- Discovery ---
+
+def found_click(stars: int = 16000) -> Repo:
+    return Repo(REPO_ID, "pallets", "click", stars, 1500, "Python", "BSD-3-Clause", ("cli",), 112, AT - timedelta(days=1), None)
+
+async def repo_row(engine) -> tuple:
+    async with engine.connect() as connection:
+        row = (await connection.execute(select(RepoRow.owner, RepoRow.stars, RepoRow.topics, RepoRow.discovered_at, RepoRow.enriched_at))).one()
+    return tuple(row)
+
+def test_save_repos_adds_discovery_fields():
+    async def body(store, engine):
+        await store.save_repos([found_click()], AT)
+        return await repo_row(engine)
+
+    assert run(body) == ("pallets", 16000, ["cli"], AT, None)
+
+# A repo found again by a later search keeps the pull requests and commits
+# fetched for it, only the discovery fields change.
+def test_found_again_keeps_enrichment():
+    async def body(store, engine):
+        await save_sample(store)
+        await store.save_repos([found_click(stars=16500)], AT + timedelta(days=1))
+        return await repo_row(engine), await store.load_enrichment(REPO_ID)
+
+    row, loaded = run(body)
+    assert row == ("pallets", 16500, ["cli"], AT + timedelta(days=1), AT)
+    assert loaded.prs == sample_prs()
+
+# save_repo is what Enricher calls, it must not wipe what discovery saved.
+def test_save_repo_keeps_discovery_fields():
+    async def body(store, engine):
+        await store.save_repos([found_click()], AT)
+        await store.save_repo(REPO_ID, "pallets-eco", "click")
+        return await repo_row(engine)
+
+    assert run(body) == ("pallets-eco", 16000, ["cli"], AT, None)

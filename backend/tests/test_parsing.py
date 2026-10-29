@@ -10,7 +10,7 @@ description: Checks that GitHub's pull request and commit nodes become the right
 from datetime import UTC, datetime
 
 from merge_hunt.domain.models import Actor, CloseSource, Interaction
-from merge_hunt.github.parsing import GHOST, parse_commit, parse_pull_request
+from merge_hunt.github.parsing import GHOST, parse_commit, parse_pull_request, parse_repo
 
 # --- Helpers ---
 
@@ -109,6 +109,37 @@ def test_closed_without_event_leaves_closer_empty():
 def test_open_pull_request_ignores_old_closed_event():
     pr = parse_pull_request(make_node(timelineItems=closed_event(account("maya"))))
     assert (pr.closed_by, pr.closed_via) == (None, None)
+
+# --- Repos ---
+
+def repo_node(**fields) -> dict:
+    node = {
+        "databaseId": 254517,
+        "name": "click",
+        "owner": {"login": "pallets"},
+        "stargazerCount": 16000,
+        "forkCount": 1500,
+        "pushedAt": "2026-10-28T09:00:00Z",
+        "primaryLanguage": {"name": "Python"},
+        "licenseInfo": {"spdxId": "BSD-3-Clause"},
+        "repositoryTopics": {"nodes": [{"topic": {"name": "cli"}}, {"topic": {"name": "python"}}]},
+        "issues": {"totalCount": 112},
+        "latestRelease": {"publishedAt": "2026-09-01T12:00:00Z"},
+    }
+    node.update(fields)
+    return node
+
+def test_reads_repo_fields():
+    repo = parse_repo(repo_node())
+    assert (repo.id, repo.owner, repo.name) == (254517, "pallets", "click")
+    assert (repo.stars, repo.forks, repo.open_issues) == (16000, 1500, 112)
+    assert (repo.language, repo.license, repo.topics) == ("Python", "BSD-3-Clause", ("cli", "python"))
+    assert repo.pushed_at == datetime(2026, 10, 28, 9, tzinfo=UTC)
+    assert repo.latest_release_at == datetime(2026, 9, 1, 12, tzinfo=UTC)
+
+def test_repo_without_language_license_or_release():
+    repo = parse_repo(repo_node(primaryLanguage=None, licenseInfo=None, latestRelease=None))
+    assert (repo.language, repo.license, repo.latest_release_at) == (None, None, None)
 
 # --- Commits ---
 

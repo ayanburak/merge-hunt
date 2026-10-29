@@ -1,6 +1,7 @@
 """
 file: queries.py
-importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, INTERACTION_LIMIT, LABEL_LIMIT
+importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, SEARCH_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, SEARCH_PAGE_SIZE,
+    INTERACTION_LIMIT, LABEL_LIMIT, TOPIC_LIMIT
 
 GraphQL query texts sent to GitHub. PULL_REQUESTS_QUERY returns one page of a
 repo's pull requests, newest first, with everything parsing.py needs to build
@@ -10,6 +11,10 @@ cursor as variables, cursor is left empty for the first page.
 COMMITS_QUERY returns one page of the commits on a repo's default branch since
 a given time, newest first. It takes owner, name, since, pageSize and cursor.
 defaultBranchRef comes back empty for a repo that has no commits at all.
+
+SEARCH_QUERY returns one page of GitHub's repo search with everything
+parsing.py needs to build a Repo. It takes query, the search text with its
+qualifiers, pageSize, topics and cursor.
 
 description: The GraphQL queries the app sends to GitHub.
 """
@@ -24,6 +29,13 @@ PULL_REQUEST_PAGE_SIZE = 50
 # three seconds and one point of the quota when this was measured.
 COMMIT_PAGE_SIZE = 100
 
+# With every field of a Repo, a page of fifty took 9.5 seconds when it was
+# measured, right under GitHub's ten second limit, and a hundred failed with
+# 502. Twenty five took four seconds. Without topics, the open issue count and
+# the latest release fifty took three seconds, those nested fields are the slow
+# part.
+SEARCH_PAGE_SIZE = 25
+
 # Comments arrive oldest first and the first maintainer response is almost
 # always among the first few. A pull request where a maintainer only writes
 # after thirty other comments is missed and may count as ignored.
@@ -32,6 +44,9 @@ INTERACTION_LIMIT = 30
 # Only label names are asked for, metrics.py looks for spam labels like
 # rejected AI among them. Ten leaves room for the usual topic labels next to it.
 LABEL_LIMIT = 10
+
+# Topics are kept for the user's topic filter, ten covers what most repos set.
+TOPIC_LIMIT = 10
 
 # --- Queries ---
 
@@ -130,6 +145,51 @@ query ($owner: String!, $name: String!, $since: GitTimestamp!, $pageSize: Int!, 
               }
             }
           }
+        }
+      }
+    }
+  }
+}
+"""
+
+# type REPOSITORY makes every node a Repository, the inline fragment is still
+# needed because search nodes are a union type in GraphQL. Only open issues are
+# counted, pull requests live in their own connection and do not end up here.
+SEARCH_QUERY = """
+query ($query: String!, $pageSize: Int!, $topics: Int!, $cursor: String) {
+  search(query: $query, type: REPOSITORY, first: $pageSize, after: $cursor) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      ... on Repository {
+        databaseId
+        name
+        owner {
+          login
+        }
+        stargazerCount
+        forkCount
+        pushedAt
+        primaryLanguage {
+          name
+        }
+        licenseInfo {
+          spdxId
+        }
+        repositoryTopics(first: $topics) {
+          nodes {
+            topic {
+              name
+            }
+          }
+        }
+        issues(states: OPEN) {
+          totalCount
+        }
+        latestRelease {
+          publishedAt
         }
       }
     }

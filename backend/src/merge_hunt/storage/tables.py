@@ -54,13 +54,24 @@ class Base(DeclarativeBase):
 # moved repo keeps its row and only owner and name change. The enrichment
 # columns stay empty until the repo is fetched for the first time. The
 # requested_since columns hold where each fetch was asked to start, the
-# complete_since ones where its data really starts.
+# complete_since ones where its data really starts. The discovery columns, from
+# stars to discovered_at, stay empty for a repo that was only ever saved by the
+# enrichment step. topics is a JSON list like labels.
 class RepoRow(Base):
     __tablename__ = "repos"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
     owner: Mapped[str]
     name: Mapped[str]
+    stars: Mapped[int | None]
+    forks: Mapped[int | None]
+    language: Mapped[str | None]
+    license: Mapped[str | None]
+    topics: Mapped[list[str] | None] = mapped_column(JSON)
+    open_issues: Mapped[int | None]
+    pushed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    latest_release_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    discovered_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     enriched_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     prs_complete_since: Mapped[datetime | None] = mapped_column(UtcDateTime)
     commits_complete_since: Mapped[datetime | None] = mapped_column(UtcDateTime)

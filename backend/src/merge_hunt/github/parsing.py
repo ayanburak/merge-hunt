@@ -1,10 +1,11 @@
 """
 file: parsing.py
-importable: parse_pull_request, parse_commit, GHOST
+importable: parse_pull_request, parse_commit, parse_repo, GHOST
 
 parse_pull_request turns one pull request node from PULL_REQUESTS_QUERY into
 a PullRequest, parse_commit turns one commit node from COMMITS_QUERY into a
-Commit. It does no network work and no filtering, the window and the
+Commit and parse_repo turns one search node from SEARCH_QUERY into a Repo.
+It does no network work and no filtering, the window and the
 bot rules are applied later by the caller and by metrics.py.
 
 description: Converts GitHub's GraphQL answers into domain objects.
@@ -17,7 +18,7 @@ description: Converts GitHub's GraphQL answers into domain objects.
 
 from datetime import datetime
 
-from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, PullRequest
+from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, PullRequest, Repo
 
 # --- Accounts ---
 
@@ -117,3 +118,31 @@ def parse_commit(node: dict) -> Commit:
         The commit with its author and the time it landed on the branch.
     """
     return Commit(author=_commit_author(node["author"]), committed_at=_time(node["committedDate"]))
+
+# --- Repos ---
+
+# primaryLanguage, licenseInfo and latestRelease come back as null when GitHub
+# has nothing for them, so each is checked before its field is read.
+def parse_repo(node: dict) -> Repo:
+    """Builds a Repo from one node of SEARCH_QUERY.
+
+    Args:
+        node: A single item of search.nodes, as GitHub returned it.
+
+    Returns:
+        The repo with its size, language, license, topics and activity.
+    """
+    language, license, release = node["primaryLanguage"], node["licenseInfo"], node["latestRelease"]
+    return Repo(
+        id=node["databaseId"],
+        owner=node["owner"]["login"],
+        name=node["name"],
+        stars=node["stargazerCount"],
+        forks=node["forkCount"],
+        language=language["name"] if language else None,
+        license=license["spdxId"] if license else None,
+        topics=tuple(item["topic"]["name"] for item in node["repositoryTopics"]["nodes"]),
+        open_issues=node["issues"]["totalCount"],
+        pushed_at=_time(node["pushedAt"]),
+        latest_release_at=_time(release["publishedAt"]) if release else None,
+    )

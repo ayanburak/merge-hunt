@@ -1,6 +1,6 @@
 """
 file: models.py
-importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment, RepoRef
+importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment, RepoRef, Repo
 
 Raw pull request and commit data, kept the way GitHub reported it. Nothing in here is
 computed, the enrichment step fills these from GitHub responses and the
@@ -16,7 +16,8 @@ PullRequestHistory and CommitHistory are what one fetch brings back, the data
 together with the date it was asked from and the date from which it is
 complete. Enrichment is both of them as the database gives them back, with
 the time they were fetched. RepoRef points at one repo on GitHub, it is what
-the enrichment step is given to work on.
+the enrichment step is given to work on. Repo is what discovery found out
+about a repo from GitHub's search, its size, language and activity.
 
 description: Raw pull request and commit data that the metrics are calculated from.
 """
@@ -91,6 +92,25 @@ class RepoRef:
     id: int
     owner: str
     name: str
+
+# Comes from GitHub's search and is saved as it was found, the scoring step
+# compares it with the user's ranges. language and license are empty when
+# GitHub knows none, license holds the SPDX id like MIT, and NOASSERTION when
+# GitHub could not tell which license it is. open_issues counts issues only,
+# not pull requests.
+@dataclass(frozen=True, slots=True)
+class Repo:
+    id: int
+    owner: str
+    name: str
+    stars: int
+    forks: int
+    language: str | None
+    license: str | None
+    topics: tuple[str, ...]
+    open_issues: int
+    pushed_at: datetime
+    latest_release_at: datetime | None
 
 # requested_since is where the fetch was asked to start. complete_since is
 # later than that only when the page limit stopped the fetch early, and the

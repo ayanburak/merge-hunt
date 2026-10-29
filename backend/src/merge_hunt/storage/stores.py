@@ -2,14 +2,17 @@
 file: stores.py
 importable: RepoStore, RepoNotFoundError
 
-RepoStore reads and writes a repo and its raw enrichment data. It is built
+RepoStore reads and writes a repo, what discovery found out about it and its
+raw enrichment data. It is built
 with an async_sessionmaker and opens its own session for every call, so
 callers never deal with sessions or transactions. Everything goes in and
 comes out as the classes of domain/models.py, the Row classes stay inside
 storage.
 
-save_repo has to run before save_enrichment, a repo's owner and name come
-from discovery and the enrichment data alone can not create the row.
+save_repo or save_repos has to run before save_enrichment, a repo's owner
+and name come from outside and the enrichment data alone can not create the
+row. save_repos keeps the enrichment data of a repo found again, save_repo
+keeps its discovery data.
 
 description: Saves and loads repos and their pull request and commit data.
 """
@@ -19,6 +22,7 @@ description: Saves and loads repos and their pull request and commit data.
 # all in a single transaction. That way complete_since always describes one
 # fetch, and a write that fails half way leaves the old data as it was.
 
+from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -34,6 +38,7 @@ from merge_hunt.domain.models import (
     Interaction,
     PullRequest,
     PullRequestHistory,
+    Repo,
 )
 from merge_hunt.storage.tables import CommitRow, InteractionRow, PullRequestRow, RepoRow
 
@@ -120,6 +125,38 @@ class RepoStore:
             else:
                 row.owner = owner
                 row.name = name
+
+    # merge looks each repo up by its primary key and updates the row when it
+    # is there, so a repo found again keeps its enrichment columns and its
+    # pull requests. Repos come from one search, a thousand at most, so one
+    # lookup per repo is fine.
+    async def save_repos(self, repos: Iterable[Repo], at: datetime) -> None:
+        """Adds the repos discovery found, or updates the ones already saved.
+
+        All of them are written in one transaction.
+
+        Args:
+            repos: The repos as the search returned them.
+            at: When they were found, timezone aware.
+        """
+        async with self._sessions.begin() as session:
+            for repo in repos:
+                await session.merge(
+                    RepoRow(
+                        id=repo.id,
+                        owner=repo.owner,
+                        name=repo.name,
+                        stars=repo.stars,
+                        forks=repo.forks,
+                        language=repo.language,
+                        license=repo.license,
+                        topics=list(repo.topics),
+                        open_issues=repo.open_issues,
+                        pushed_at=repo.pushed_at,
+                        latest_release_at=repo.latest_release_at,
+                        discovered_at=at,
+                    )
+                )
 
     # Deleting the pull requests takes their interactions with them through
     # the database cascade, tables.py explains why that needs foreign_keys on.

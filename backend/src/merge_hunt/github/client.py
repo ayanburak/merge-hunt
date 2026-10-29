@@ -16,6 +16,9 @@ domain/models.py. When
 the page limit stops it early, complete_since tells from which date on the
 data is complete.
 
+search_repos(query, limit) runs GitHub's repo search with a ready search text
+and returns up to limit repos as Repo objects, in the order GitHub ranks them.
+
 commits(owner, name, since) does the same for the commits on the default
 branch and returns a CommitHistory. Merge commits are left out, bot commits
 stay in and are only marked.
@@ -28,8 +31,6 @@ commits with a RateLimitWait, or logs a warning if there is none.
 description: Async client for the GitHub API.
 """
 
-# TODO: Search is not here yet, it comes with the discovery step.
-#
 # NOTE: A waiting request keeps the lock while it sleeps, so every other call
 # on the same client waits too. That is on purpose, the quota is shared and a
 # second request would only run into the same limit.
@@ -47,8 +48,8 @@ from enum import StrEnum
 
 import httpx
 
-from merge_hunt.domain.models import Commit, CommitHistory, PullRequest, PullRequestHistory
-from merge_hunt.github.parsing import parse_commit, parse_pull_request
+from merge_hunt.domain.models import Commit, CommitHistory, PullRequest, PullRequestHistory, Repo
+from merge_hunt.github.parsing import parse_commit, parse_pull_request, parse_repo
 from merge_hunt.github.queries import (
     COMMIT_PAGE_SIZE,
     COMMITS_QUERY,
@@ -56,6 +57,9 @@ from merge_hunt.github.queries import (
     LABEL_LIMIT,
     PULL_REQUEST_PAGE_SIZE,
     PULL_REQUESTS_QUERY,
+    SEARCH_PAGE_SIZE,
+    SEARCH_QUERY,
+    TOPIC_LIMIT,
 )
 from merge_hunt.github.token import TokenProvider
 
@@ -360,3 +364,40 @@ class GitHubClient:
                 return CommitHistory(tuple(commits), since, since)
             cursor = page["pageInfo"]["endCursor"]
         return CommitHistory(tuple(commits), oldest, since)
+
+    # The last page only asks for what is still missing, so a limit of thirty
+    # costs a page of twenty five and one of five. GitHub never returns more
+    # than a thousand results for one search, whatever the limit.
+    async def search_repos(self, query: str, limit: int, on_wait: WaitListener | None = None) -> list[Repo]:
+        """Runs a repo search and returns the repos it finds.
+
+        Args:
+            query: The search text with GitHub's qualifiers, like
+                language:Python stars:200..5000.
+            limit: The most repos to return.
+            on_wait: Called before every wait caused by a limit or a server
+                error. When missing, waits are logged as warnings.
+
+        Returns:
+            Up to limit repos in GitHub's order, fewer when the search runs out.
+
+        Raises:
+            GitHubAuthError: The token was rejected.
+            GitHubQueryError: GitHub could not answer, for example the search text is invalid.
+            httpx.HTTPStatusError: GitHub kept failing after every retry.
+        """
+        repos: list[Repo] = []
+        cursor = None
+        while len(repos) < limit:
+            variables = {
+                "query": query,
+                "pageSize": min(SEARCH_PAGE_SIZE, limit - len(repos)),
+                "topics": TOPIC_LIMIT,
+                "cursor": cursor,
+            }
+            page = (await self._graphql(SEARCH_QUERY, variables, on_wait))["search"]
+            repos.extend(parse_repo(node) for node in page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+        return repos

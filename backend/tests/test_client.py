@@ -5,7 +5,7 @@ Tests for github/client.py. Requests never leave the machine, httpx's
 MockTransport hands every request to a function in the test that decides the
 answer. Waits are recorded by a fake sleep and take no time.
 
-description: Checks paging of pull requests and commits, error handling and the wait and retry rules of GitHubClient.
+description: Checks paging of pull requests, commits and repo search, error handling and the wait and retry rules of GitHubClient.
 """
 
 import asyncio
@@ -25,7 +25,7 @@ from merge_hunt.github.client import (
     RateLimitWait,
     WaitReason,
 )
-from merge_hunt.github.queries import COMMIT_PAGE_SIZE, PULL_REQUEST_PAGE_SIZE
+from merge_hunt.github.queries import COMMIT_PAGE_SIZE, PULL_REQUEST_PAGE_SIZE, SEARCH_PAGE_SIZE
 from merge_hunt.github.token import StaticTokenProvider
 
 # --- Helpers ---
@@ -177,6 +177,45 @@ def test_repo_without_default_branch_has_no_commits():
     history = run(handler, fetch_commits)
     assert history.commits == ()
     assert history.complete_since == SINCE
+
+# --- Search ---
+
+def repo_node(number: int) -> dict:
+    return {
+        "databaseId": number,
+        "name": f"repo{number}",
+        "owner": {"login": "owner"},
+        "stargazerCount": 300,
+        "forkCount": 20,
+        "pushedAt": "2026-10-20T00:00:00Z",
+        "primaryLanguage": None,
+        "licenseInfo": None,
+        "repositoryTopics": {"nodes": []},
+        "issues": {"totalCount": 4},
+        "latestRelease": None,
+    }
+
+def search_page(numbers: range, has_next: bool, cursor: str = "next") -> httpx.Response:
+    data = {"search": {
+        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+        "nodes": [repo_node(number) for number in numbers],
+    }}
+    return httpx.Response(200, json={"data": data})
+
+# Thirty repos are asked for, the second page only asks for the five missing.
+def test_search_stops_at_limit():
+    handler, seen = scripted(search_page(range(25), has_next=True, cursor="s1"), search_page(range(25, 30), has_next=True))
+    repos = run(handler, lambda client: client.search_repos("language:Python", 30))
+    assert [item["variables"]["pageSize"] for item in seen] == [SEARCH_PAGE_SIZE, 5]
+    assert seen[1]["variables"]["cursor"] == "s1"
+    assert seen[0]["variables"]["query"] == "language:Python"
+    assert [repo.id for repo in repos] == list(range(30))
+
+def test_search_stops_when_results_run_out():
+    handler, seen = scripted(search_page(range(3), has_next=False))
+    repos = run(handler, lambda client: client.search_repos("language:Python", 100))
+    assert len(seen) == 1
+    assert len(repos) == 3
 
 # --- Errors ---
 
