@@ -1,6 +1,6 @@
 """
 file: tables.py
-importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow
+importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow, ScanRow, ScanRepoRow
 
 The SQLAlchemy classes behind the database tables. One object of a Row class
 is one row of its table. They mirror the classes in domain/models.py but stay
@@ -11,7 +11,7 @@ An Actor is not a table of its own, it is two columns wherever it is used, a
 login and an is_bot. is_bot is decided differently for pull requests and for
 commits, so one shared accounts table could not hold a single right value.
 
-description: Database tables for repos and their raw pull request and commit data.
+description: Database tables for repos, their raw pull request and commit data, and the scans that fetched them.
 """
 
 # NOTE: Deleting a repo's pull requests also deletes their interactions through
@@ -126,3 +126,34 @@ class CommitRow(Base):
     author_login: Mapped[str]
     author_is_bot: Mapped[bool]
     committed_at: Mapped[datetime] = mapped_column(UtcDateTime)
+
+# status and stage hold ScanStatus and ScanStage values. options is the JSON
+# the scan was started with, kept so the UI can show what was searched.
+class ScanRow(Base):
+    __tablename__ = "scans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str]
+    stage: Mapped[str]
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    options: Mapped[dict] = mapped_column(JSON)
+    candidates: Mapped[int] = mapped_column(default=0)
+    skipped: Mapped[int] = mapped_column(default=0)
+    done: Mapped[int] = mapped_column(default=0)
+    failed: Mapped[int] = mapped_column(default=0)
+    waiting_until: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    error: Mapped[str | None]
+
+# One repo a scan sent to enrichment. status stays empty until the repo is
+# handled, then it holds an EnrichStatus value. The repo row is never deleted
+# while a scan points at it, nothing in the app deletes repos.
+class ScanRepoRow(Base):
+    __tablename__ = "scan_repos"
+    __table_args__ = (UniqueConstraint("scan_id", "repo_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_id: Mapped[int] = mapped_column(ForeignKey("scans.id", ondelete="CASCADE"))
+    repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id"))
+    status: Mapped[str | None]
+    error: Mapped[str | None]

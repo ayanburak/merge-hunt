@@ -18,6 +18,8 @@ data is complete.
 
 search_repos(query, limit) runs GitHub's repo search with a ready search text
 and returns up to limit repos as Repo objects, in the order GitHub ranks them.
+count_pull_requests(owner, name, since) only returns how many pull requests a
+repo got since a day, discovery uses it to skip repos before the expensive fetch.
 
 commits(owner, name, since) does the same for the commits on the default
 branch and returns a CommitHistory. Merge commits are left out, bot commits
@@ -55,6 +57,7 @@ from merge_hunt.github.queries import (
     COMMITS_QUERY,
     INTERACTION_LIMIT,
     LABEL_LIMIT,
+    PULL_REQUEST_COUNT_QUERY,
     PULL_REQUEST_PAGE_SIZE,
     PULL_REQUESTS_QUERY,
     SEARCH_PAGE_SIZE,
@@ -364,6 +367,33 @@ class GitHubClient:
                 return CommitHistory(tuple(commits), since, since)
             cursor = page["pageInfo"]["endCursor"]
         return CommitHistory(tuple(commits), oldest, since)
+
+    # GitHub's created qualifier takes a date, so since is cut to its day and a
+    # pull request opened earlier that day is counted too. The scan uses the
+    # count for a rough range check, a day more does not matter there.
+    async def count_pull_requests(self, owner: str, name: str, since: datetime, on_wait: WaitListener | None = None) -> int:
+        """Counts the pull requests opened in a repo since a given day.
+
+        Bots and the team are counted like everyone else, nothing is fetched
+        but the number.
+
+        Args:
+            owner: The user or organization that owns the repo.
+            name: The repo name.
+            since: Pull requests opened on this day or later are counted.
+            on_wait: Called before every wait caused by a limit or a server
+                error. When missing, waits are logged as warnings.
+
+        Returns:
+            The number of pull requests, open and closed.
+
+        Raises:
+            GitHubAuthError: The token was rejected.
+            GitHubQueryError: GitHub could not answer.
+            httpx.HTTPStatusError: GitHub kept failing after every retry.
+        """
+        query = f"repo:{owner}/{name} is:pr created:>={since.date().isoformat()}"
+        return (await self._graphql(PULL_REQUEST_COUNT_QUERY, {"query": query}, on_wait))["search"]["issueCount"]
 
     # The last page only asks for what is still missing, so a limit of thirty
     # costs a page of twenty five and one of five. GitHub never returns more

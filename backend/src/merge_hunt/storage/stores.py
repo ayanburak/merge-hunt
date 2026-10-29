@@ -1,6 +1,6 @@
 """
 file: stores.py
-importable: RepoStore, RepoNotFoundError
+importable: RepoStore, ScanStore, RepoNotFoundError
 
 RepoStore reads and writes a repo, what discovery found out about it and its
 raw enrichment data. It is built
@@ -17,7 +17,11 @@ and name come from outside and the enrichment data alone can not create the
 row. save_repos keeps the enrichment data of a repo found again, save_repo
 keeps its discovery data.
 
-description: Saves and loads repos and their pull request and commit data.
+ScanStore keeps the scans, their state, counts and the repos each one sent to
+enrichment. Every call is its own transaction too, so the UI reading a scan in
+the middle of it always sees the last finished step.
+
+description: Saves and loads repos, their pull request and commit data, and scans.
 """
 
 # NOTE: save_enrichment does not merge with what is already there, it deletes
@@ -28,7 +32,7 @@ description: Saves and loads repos and their pull request and commit data.
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -42,8 +46,10 @@ from merge_hunt.domain.models import (
     PullRequest,
     PullRequestHistory,
     Repo,
+    RepoRef,
 )
-from merge_hunt.storage.tables import CommitRow, InteractionRow, PullRequestRow, RepoRow
+from merge_hunt.domain.scans import Scan, ScanStage, ScanStatus
+from merge_hunt.storage.tables import CommitRow, InteractionRow, PullRequestRow, RepoRow, ScanRepoRow, ScanRow
 
 # --- Errors ---
 
@@ -118,6 +124,22 @@ def _repo(row: RepoRow) -> Repo:
         open_issues=row.open_issues,
         pushed_at=row.pushed_at,
         latest_release_at=row.latest_release_at,
+    )
+
+def _scan(row: ScanRow) -> Scan:
+    return Scan(
+        id=row.id,
+        status=ScanStatus(row.status),
+        stage=ScanStage(row.stage),
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        options=row.options,
+        candidates=row.candidates,
+        skipped=row.skipped,
+        done=row.done,
+        failed=row.failed,
+        waiting_until=row.waiting_until,
+        error=row.error,
     )
 
 # --- Store ---
@@ -257,3 +279,116 @@ class RepoStore:
                     tuple(_commit(row) for row in commit_rows), repo.commits_complete_since, repo.commits_requested_since
                 ),
             )
+
+# Written by ScanJob step by step and read by the API while the scan runs.
+# The scan id passed in always comes from start, a missing row would be a
+# mistake in the calling code, so the methods that change a scan do not check.
+class ScanStore:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    async def start(self, options: dict, at: datetime) -> int:
+        """Opens a new scan as running, in the discovery stage.
+
+        Args:
+            options: What the scan was started with, has to fit in JSON.
+            at: When it started, timezone aware.
+
+        Returns:
+            The new scan's id.
+        """
+        async with self._sessions.begin() as session:
+            row = ScanRow(status=ScanStatus.RUNNING, stage=ScanStage.DISCOVERY, started_at=at, options=options)
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    # The repos must be saved already, discovery does that before it returns
+    # them, scan_repos points at the repos table.
+    async def set_discovered(self, scan_id: int, found: int, repos: Iterable[RepoRef]) -> None:
+        """Records what discovery found and moves the scan to enrichment.
+
+        Args:
+            scan_id: The scan.
+            found: How many repos the search found.
+            repos: The repos sent to enrichment, the rest count as skipped.
+        """
+        repos = list(repos)
+        async with self._sessions.begin() as session:
+            row = await session.get(ScanRow, scan_id)
+            row.stage = ScanStage.ENRICHMENT
+            row.candidates = found
+            row.skipped = found - len(repos)
+            session.add_all(ScanRepoRow(scan_id=scan_id, repo_id=repo.id) for repo in repos)
+
+    # A finished repo also means the scan is no longer waiting, so the wait is
+    # cleared here and not in a call of its own.
+    async def record_repo(self, scan_id: int, repo_id: int, status: str, error: str | None) -> None:
+        """Records how one repo's enrichment ended.
+
+        Args:
+            scan_id: The scan.
+            repo_id: The repo, one of those given to set_discovered.
+            status: The EnrichStatus value.
+            error: Why it failed, None when it did not. A repo with an error
+                counts as failed, every other one as done.
+        """
+        async with self._sessions.begin() as session:
+            await session.execute(
+                update(ScanRepoRow)
+                .where(ScanRepoRow.scan_id == scan_id, ScanRepoRow.repo_id == repo_id)
+                .values(status=status, error=error)
+            )
+            row = await session.get(ScanRow, scan_id)
+            if error is None:
+                row.done += 1
+            else:
+                row.failed += 1
+            row.waiting_until = None
+
+    async def set_waiting(self, scan_id: int, until: datetime) -> None:
+        """Records that the scan waits for GitHub until the given time."""
+        async with self._sessions.begin() as session:
+            row = await session.get(ScanRow, scan_id)
+            row.waiting_until = until
+
+    async def finish(self, scan_id: int, status: ScanStatus, at: datetime, error: str | None = None) -> None:
+        """Closes a scan.
+
+        Args:
+            scan_id: The scan.
+            status: DONE, or FAILED when an error stopped it.
+            at: When it ended, timezone aware.
+            error: What stopped it, only for FAILED.
+        """
+        async with self._sessions.begin() as session:
+            row = await session.get(ScanRow, scan_id)
+            row.status = status
+            row.finished_at = at
+            row.waiting_until = None
+            row.error = error
+
+    # Called once when the app starts. Anything still running then belongs to
+    # a process that is gone.
+    async def interrupt_running(self, at: datetime) -> int:
+        """Marks every scan still running as interrupted.
+
+        Args:
+            at: Written as their end time, timezone aware.
+
+        Returns:
+            How many scans were marked.
+        """
+        async with self._sessions.begin() as session:
+            result = await session.execute(
+                update(ScanRow)
+                .where(ScanRow.status == ScanStatus.RUNNING)
+                .values(status=ScanStatus.INTERRUPTED, finished_at=at, waiting_until=None)
+            )
+            return result.rowcount
+
+    async def load(self, scan_id: int) -> Scan | None:
+        """Loads a scan, None when there is no scan with this id."""
+        async with self._sessions() as session:
+            row = await session.get(ScanRow, scan_id)
+            return None if row is None else _scan(row)

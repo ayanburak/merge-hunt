@@ -56,7 +56,7 @@ class EnrichResult:
     status: EnrichStatus
     error: str | None = None
 
-# The scan job will hang a listener here that writes progress to the database.
+# The scan job hangs a listener here that writes progress to the database.
 ProgressListener = Callable[[EnrichResult], Awaitable[None]]
 
 # --- Freshness ---

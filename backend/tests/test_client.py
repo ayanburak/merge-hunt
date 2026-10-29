@@ -217,6 +217,12 @@ def test_search_stops_when_results_run_out():
     assert len(seen) == 1
     assert len(repos) == 3
 
+def test_count_pull_requests_asks_for_the_day():
+    handler, seen = scripted(httpx.Response(200, json={"data": {"search": {"issueCount": 42}}}))
+    count = run(handler, lambda client: client.count_pull_requests("pallets", "click", SINCE + timedelta(hours=13)))
+    assert count == 42
+    assert seen[0]["variables"]["query"] == "repo:pallets/click is:pr created:>=2026-04-01"
+
 # --- Errors ---
 
 def test_graphql_errors_raise_query_error():
