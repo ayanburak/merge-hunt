@@ -1,6 +1,6 @@
 """
 file: models.py
-importable: Actor, Interaction, PullRequest, CloseSource, Commit
+importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment
 
 Raw pull request and commit data, kept the way GitHub reported it. Nothing in here is
 computed, the enrichment step fills these from GitHub responses and the
@@ -11,6 +11,10 @@ can be applied to old data without fetching it again.
 Every class is frozen, an object can not be changed after it is built, and
 lists inside are tuples for the same reason. All datetimes are expected to be
 timezone aware and in UTC.
+
+PullRequestHistory and CommitHistory are what one fetch brings back, the data
+together with the date from which it is complete. Enrichment is both of them
+as the database gives them back, with the time they were fetched.
 
 description: Raw pull request and commit data that the metrics are calculated from.
 """
@@ -72,3 +76,26 @@ class PullRequest:
 class Commit:
     author: Actor
     committed_at: datetime
+
+# --- Fetched Data ---
+
+# prs only holds pull requests opened at or after complete_since.
+@dataclass(frozen=True, slots=True)
+class PullRequestHistory:
+    prs: tuple[PullRequest, ...]
+    complete_since: datetime
+
+# commits only holds commits made at or after complete_since.
+@dataclass(frozen=True, slots=True)
+class CommitHistory:
+    commits: tuple[Commit, ...]
+    complete_since: datetime
+
+# Pull requests and commits are always fetched and saved together, so a single
+# enriched_at covers both. Each keeps its own complete_since because their
+# windows differ.
+@dataclass(frozen=True, slots=True)
+class Enrichment:
+    enriched_at: datetime
+    prs: PullRequestHistory
+    commits: CommitHistory

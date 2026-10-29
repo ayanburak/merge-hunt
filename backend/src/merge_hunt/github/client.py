@@ -1,6 +1,6 @@
 """
 file: client.py
-importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, PullRequestHistory, CommitHistory, GitHubAuthError, GitHubQueryError
+importable: GitHubClient, RateLimit, RateLimitWait, WaitReason, GitHubAuthError, GitHubQueryError
 
 GitHubClient is the only place in the app that talks to GitHub. It is built
 with a TokenProvider and an httpx.AsyncClient, both passed in from outside.
@@ -9,7 +9,8 @@ rate_limit() reports the remaining request quota and does not use any of it,
 so it is also the cheapest way to check that a token works.
 
 pull_requests(owner, name, since) fetches a repo's pull requests opened since
-the given time, newest first, and returns them as a PullRequestHistory. When
+the given time, newest first, and returns them as a PullRequestHistory from
+domain/models.py. When
 the page limit stops it early, complete_since tells from which date on the
 data is complete.
 
@@ -44,7 +45,7 @@ from enum import StrEnum
 
 import httpx
 
-from merge_hunt.domain.models import Commit, PullRequest
+from merge_hunt.domain.models import Commit, CommitHistory, PullRequest, PullRequestHistory
 from merge_hunt.github.parsing import parse_commit, parse_pull_request
 from merge_hunt.github.queries import (
     COMMIT_PAGE_SIZE,
@@ -112,18 +113,6 @@ class RateLimitWait:
     reason: WaitReason
     until: datetime
     attempt: int
-
-# prs only holds pull requests opened at or after complete_since.
-@dataclass(frozen=True, slots=True)
-class PullRequestHistory:
-    prs: tuple[PullRequest, ...]
-    complete_since: datetime
-
-# commits only holds commits made at or after complete_since.
-@dataclass(frozen=True, slots=True)
-class CommitHistory:
-    commits: tuple[Commit, ...]
-    complete_since: datetime
 
 WaitListener = Callable[[RateLimitWait], Awaitable[None]]
 
