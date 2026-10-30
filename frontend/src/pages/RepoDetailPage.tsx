@@ -25,6 +25,15 @@ const AGES: [number | null, string][] = [[null, "Any age"], [365, "1 year"], [73
 
 const START: IssueFilter = { hide_assigned: true, hide_linked: true, max_age_days: null, show_skipped: false };
 
+function Unknown() {
+  return (
+    <div className={styles.blank}>
+      <h2>This repo is not known here</h2>
+      <p>Pick one from the <Link to="/">results of a scan</Link>.</p>
+    </div>
+  );
+}
+
 function RepoView({ id }: { id: number }) {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -47,14 +56,7 @@ function RepoView({ id }: { id: number }) {
   );
 
   const problem = repo.error ?? issues.error;
-  if (problem instanceof ApiError && problem.status === 404) {
-    return (
-      <div className={styles.blank}>
-        <h2>This repo is not known here</h2>
-        <p>Pick one from the <Link to="/">results of a scan</Link>.</p>
-      </div>
-    );
-  }
+  if (problem instanceof ApiError && problem.status === 404) return <Unknown />;
   if (problem && !repo.data) {
     return <div className={styles.blank}><h2>This repo could not be loaded</h2><p>{problem.message}</p></div>;
   }
@@ -124,6 +126,7 @@ function RepoView({ id }: { id: number }) {
   );
 }
 
+// An address like /repos/abc never reaches the backend, its answer would be a technical sentence.
 export function RepoDetailPage() {
   const id = Number(useParams().id);
 
@@ -131,7 +134,7 @@ export function RepoDetailPage() {
     <div className={styles.page}>
       <title>merge-hunt · Repo</title>
       <TopBar />
-      <RepoView key={id} id={id} />
+      {Number.isSafeInteger(id) ? <RepoView key={id} id={id} /> : <Unknown />}
     </div>
   );
 }

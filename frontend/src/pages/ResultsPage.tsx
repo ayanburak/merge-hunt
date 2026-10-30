@@ -61,13 +61,15 @@ function Blank({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+function Unknown() {
+  return <Blank title="This scan does not exist">Pick one from the <Link to="/">list of scans</Link>.</Blank>;
+}
+
 function Unavailable({ error }: { error: Error }) {
   if (error instanceof ApiError && error.status === 0) {
     return <Blank title="The backend is not answering">Start it with uv run uvicorn merge_hunt.main:app in the backend folder, then reload this page.</Blank>;
   }
-  if (error instanceof ApiError && error.status === 404) {
-    return <Blank title="This scan does not exist">Pick one from the <Link to="/">list of scans</Link>.</Blank>;
-  }
+  if (error instanceof ApiError && error.status === 404) return <Unknown />;
   return <Blank title="The results could not be loaded">{error.message}</Blank>;
 }
 
@@ -197,8 +199,10 @@ function ResultsView({ id, defaults, profiles }: { id: number; defaults: Profile
   );
 }
 
+// An address like /scans/abc/results never reaches the backend, its answer would be a technical sentence.
 export function ResultsPage() {
   const id = Number(useParams().id);
+  const valid = Number.isSafeInteger(id);
   const defaults = useQuery({ queryKey: ["profile-default"], queryFn: defaultProfile, staleTime: Infinity });
   const profiles = useQuery({ queryKey: PROFILE_KEY, queryFn: listProfiles });
   const problem = defaults.error ?? profiles.error;
@@ -207,8 +211,9 @@ export function ResultsPage() {
     <>
       <title>merge-hunt · Results</title>
       <div className={styles.bar}><TopBar /></div>
-      {problem && <Unavailable error={problem} />}
-      {defaults.data && profiles.data && <ResultsView key={id} id={id} defaults={defaults.data} profiles={profiles.data} />}
+      {!valid && <Unknown />}
+      {valid && problem && <Unavailable error={problem} />}
+      {valid && defaults.data && profiles.data && <ResultsView key={id} id={id} defaults={defaults.data} profiles={profiles.data} />}
     </>
   );
 }
