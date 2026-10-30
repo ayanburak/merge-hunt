@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, createProfile, deleteProfile, getScan, giveFeedback, listScans, repoIssues } from "./client";
+import { ApiError, createProfile, deleteProfile, getScan, giveFeedback, listScans, repoIssues, shouldRetry } from "./client";
 import type { ProfileSettings } from "./client";
 
 // A fresh Response for each call, the body of one can only be read once.
@@ -14,6 +14,22 @@ const answer = (status: number, body?: unknown) =>
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("shouldRetry", () => {
+  it("tries once more after a lost connection or a server error", () => {
+    expect(shouldRetry(0, new ApiError(0, "gone"))).toBe(true);
+    expect(shouldRetry(0, new ApiError(500, "broken"))).toBe(true);
+  });
+
+  it("stops after one more try", () => {
+    expect(shouldRetry(1, new ApiError(500, "broken"))).toBe(false);
+  });
+
+  it("takes the answer of the backend as final when it refuses", () => {
+    expect(shouldRetry(0, new ApiError(404, "missing"))).toBe(false);
+    expect(shouldRetry(0, new ApiError(422, "rejected"))).toBe(false);
+  });
 });
 
 describe("request", () => {

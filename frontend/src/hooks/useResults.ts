@@ -26,11 +26,9 @@ export function useResults(id: number, settings: ProfileSettings) {
     return () => clearTimeout(timer);
   }, [settings]);
 
-  // A rejected setting would fail the same way twice, so there is no retry here.
   const query = useQuery({
     queryKey: ["results", id, asked],
     queryFn: () => scanResults(id, asked),
-    retry: false,
   });
 
   const shown = useRef<Shown | null>(null);

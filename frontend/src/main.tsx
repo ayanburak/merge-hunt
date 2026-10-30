@@ -15,11 +15,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
+import { shouldRetry } from "./api/client";
 import { App } from "./App";
 
 // One retry is enough, the backend runs on the same machine. With the default three a closed
 // backend would take seven seconds to show its error.
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: shouldRetry } } });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

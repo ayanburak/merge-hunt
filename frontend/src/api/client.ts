@@ -1,6 +1,6 @@
 /**
  * file: src/api/client.ts
- * importable: ApiError, scanDefaults, startScan, listScans, getScan, scanResults, defaultProfile,
+ * importable: ApiError, shouldRetry, scanDefaults, startScan, listScans, getScan, scanResults, defaultProfile,
  *             listProfiles, createProfile, updateProfile, deleteProfile, getRepo, repoIssues,
  *             refreshIssues, giveFeedback, takeBackFeedback, and the types they use
  *
@@ -53,6 +53,14 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// A 4xx answer is the backend's decision and it would say the same again, only a lost connection
+// or a server error is worth one more try. The wait before that try is what kept a page blank for
+// a second when a repo did not exist.
+export function shouldRetry(count: number, error: Error): boolean {
+  const refused = error instanceof ApiError && error.status >= 400 && error.status < 500;
+  return count < 1 && !refused;
 }
 
 // FastAPI sends a plain sentence for the errors we raise and a list for a body it rejected.
