@@ -4,9 +4,10 @@ importable: IssueFinder, IssueResult, IssueFetchError, IssueProgressListener, DE
 
 IssueFinder is the fourth stage of the scan. It is built with a GitHubClient,
 an IssueStore and an IssueAnalyzer. find(repos, labels) walks the given repos
-one by one, fetches their open issues carrying one of the labels and saves
-them. Unlike enrichment there is no freshness check, a fetch takes about a
-second and issues get taken quickly.
+one by one, fetches their open issues carrying one of the labels and every
+issue opened in the last RECENT_ISSUE_DAYS, and saves them. Unlike enrichment
+there is no freshness check, a fetch takes a few seconds and issues get taken
+quickly.
 
 refresh(repo) does the same for one repo outside a scan, with the labels of its
 last fetch. load(repo_id, options) reads what is saved, filters it and runs the
@@ -20,7 +21,7 @@ description: Fetches and saves the open issues of repos and gives them back filt
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -36,6 +37,10 @@ from merge_hunt.storage.stores import IssueStore
 # covered what looked for a beginner, and hacktoberfest is left out because it
 # only means something one month a year.
 DEFAULT_ISSUE_LABELS = ("good first issue", "help wanted")
+
+# New issues count even without a label. In October 2026 only five of the 166
+# issues opened in nine repos over half a year carried one of the labels above.
+RECENT_ISSUE_DAYS = 180
 
 # --- Results ---
 
@@ -68,8 +73,11 @@ class IssueFinder:
         self._clock = clock
 
     async def _fetch(self, repo: RepoRef, labels: Sequence[str], on_wait: WaitListener | None) -> None:
-        issues = await self._client.issues(repo.owner, repo.name, labels, on_wait)
-        await self._store.save(repo.id, issues, labels, self._clock())
+        now = self._clock()
+        labelled = await self._client.issues(repo.owner, repo.name, labels, on_wait)
+        recent = await self._client.recent_issues(repo.owner, repo.name, now - timedelta(days=RECENT_ISSUE_DAYS), on_wait)
+        unique = {issue.number: issue for issue in (*labelled, *recent)}
+        await self._store.save(repo.id, unique.values(), labels, now)
 
     async def find(
         self,
@@ -82,7 +90,7 @@ class IssueFinder:
 
         Args:
             repos: The repos, handled one at a time in this order.
-            labels: Issues carrying one of these are fetched.
+            labels: Issues carrying one of these are fetched at any age.
             on_progress: Called with each repo's result as soon as it is done.
             on_wait: Handed to the client, called before every wait caused by
                 a limit or a server error.
@@ -129,15 +137,16 @@ class IssueFinder:
             options: What the user wants to hide.
 
         Returns:
-            The issues that pass the filter, last updated first. fetched_at is
-            empty when the repo's issues were never fetched.
+            The issues that pass the filter, newest first. fetched_at is empty
+            when the repo's issues were never fetched.
         """
         fetch = await self._store.load(repo_id)
         if fetch is None:
             return RepoIssues(None, (), ())
         now = self._clock()
         feedback = await self._store.feedback(repo_id)
-        shown = [issue for issue in fetch.issues if is_shown(issue, options, now, feedback.get(issue.number))]
+        newest = sorted(fetch.issues, key=lambda issue: issue.created_at, reverse=True)
+        shown = [issue for issue in newest if is_shown(issue, options, now, feedback.get(issue.number))]
         analyzed = [AnalyzedIssue(issue, await self._analyzer.analyze(issue), feedback.get(issue.number)) for issue in shown]
         return RepoIssues(fetch.fetched_at, fetch.labels, tuple(analyzed))
 

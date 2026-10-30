@@ -19,9 +19,10 @@ qualifiers, pageSize, topics and cursor.
 PULL_REQUEST_COUNT_QUERY only asks for the number of results of an issue
 search, it takes query and the search text should hold repo and is:pr.
 
-ISSUES_QUERY returns one page of a repo's open issues carrying at least one of
-the given labels, last updated first. It takes owner, name, issueLabels,
-pageSize, labels, comments and cursor.
+ISSUES_QUERY returns one page of a repo's open issues, newest first by the order
+field. It takes owner, name, issueLabels, order, pageSize, labels, comments and
+cursor. Empty issueLabels means every issue, otherwise an issue has to carry at
+least one of them. order is UPDATED_AT or CREATED_AT.
 
 description: The GraphQL queries the app sends to GitHub.
 """
@@ -226,14 +227,14 @@ query ($query: String!) {
 # includeClosedPrs is off so a rejected attempt does not make an issue look
 # taken. bodyText is the plain text, nothing later needs the markdown.
 ISSUES_QUERY = """
-query ($owner: String!, $name: String!, $issueLabels: [String!], $pageSize: Int!, $labels: Int!, $comments: Int!, $cursor: String) {
+query ($owner: String!, $name: String!, $issueLabels: [String!], $order: IssueOrderField!, $pageSize: Int!, $labels: Int!, $comments: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     issues(
       states: OPEN
       labels: $issueLabels
       first: $pageSize
       after: $cursor
-      orderBy: {field: UPDATED_AT, direction: DESC}
+      orderBy: {field: $order, direction: DESC}
     ) {
       pageInfo {
         hasNextPage

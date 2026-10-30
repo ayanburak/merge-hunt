@@ -324,12 +324,12 @@ def test_requests_go_out_one_at_a_time():
 
 # --- Issues ---
 
-def issue_page(number: int, has_next: bool, cursor: str = "next") -> httpx.Response:
+def issue_page(number: int, has_next: bool, cursor: str = "next", created: str = "2026-01-01T10:00:00Z") -> httpx.Response:
     item = {
         "number": number,
         "title": "Fix it",
         "bodyText": "",
-        "createdAt": "2026-01-01T10:00:00Z",
+        "createdAt": created,
         "updatedAt": "2026-02-01T10:00:00Z",
         "author": None,
         "labels": {"nodes": []},
@@ -347,6 +347,19 @@ def test_issues_follow_pages_and_send_labels():
     assert seen[0]["variables"]["issueLabels"] == ["help wanted", "easy"]
     assert seen[0]["variables"]["pageSize"] == ISSUE_PAGE_SIZE
     assert seen[0]["variables"]["cursor"] is None and seen[1]["variables"]["cursor"] == "c1"
+
+def test_recent_issues_stop_at_the_first_page_past_the_date():
+    since = datetime(2026, 5, 1, tzinfo=UTC)
+    handler, seen = scripted(
+        issue_page(1, True, "c1", created="2026-10-01T00:00:00Z"),
+        issue_page(2, True, "c2", created="2026-01-01T00:00:00Z"),
+        issue_page(3, False, created="2026-01-01T00:00:00Z"),
+    )
+    issues = run(handler, lambda client: client.recent_issues("owner", "repo", since))
+    assert [issue.number for issue in issues] == [1]
+    assert len(seen) == 2
+    assert seen[0]["variables"]["order"] == "CREATED_AT"
+    assert seen[0]["variables"]["issueLabels"] is None
 
 def test_issues_stop_at_page_limit():
     handler, seen = scripted(*[issue_page(number, True) for number in range(MAX_PAGES + 1)])

@@ -27,9 +27,8 @@ class FeedbackValue(StrEnum):
 
 # --- Filter ---
 
-# There is no age limit by default. In October 2026 only one of the thirty two
-# free issues in fifteen repos was younger than a year, a limit would empty the
-# list. Sorting by last update does more for the user here.
+# There is no age limit by default. Old issues with a label stay in the list,
+# they only sort behind the new ones.
 @dataclass(frozen=True, slots=True)
 class IssueFilter:
     hide_assigned: bool = True

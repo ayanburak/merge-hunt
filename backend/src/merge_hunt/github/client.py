@@ -439,6 +439,21 @@ class GitHubClient:
             cursor = page["pageInfo"]["endCursor"]
         return repos
 
+    async def _issue_page(
+        self, owner: str, name: str, labels: Sequence[str] | None, order: str, cursor: str | None, on_wait: WaitListener | None
+    ) -> dict:
+        variables = {
+            "owner": owner,
+            "name": name,
+            "issueLabels": labels and list(labels),
+            "order": order,
+            "pageSize": ISSUE_PAGE_SIZE,
+            "labels": LABEL_LIMIT,
+            "comments": ISSUE_COMMENT_LIMIT,
+            "cursor": cursor,
+        }
+        return (await self._graphql(ISSUES_QUERY, variables, on_wait))["repository"]["issues"]
+
     # Newest updates come first, so what MAX_PAGES cuts off is the part of a
     # very long list nobody touched for the longest time.
     async def issues(self, owner: str, name: str, labels: Sequence[str], on_wait: WaitListener | None = None) -> tuple[Issue, ...]:
@@ -462,18 +477,41 @@ class GitHubClient:
         issues: list[Issue] = []
         cursor = None
         for _ in range(MAX_PAGES):
-            variables = {
-                "owner": owner,
-                "name": name,
-                "issueLabels": list(labels),
-                "pageSize": ISSUE_PAGE_SIZE,
-                "labels": LABEL_LIMIT,
-                "comments": ISSUE_COMMENT_LIMIT,
-                "cursor": cursor,
-            }
-            page = (await self._graphql(ISSUES_QUERY, variables, on_wait))["repository"]["issues"]
+            page = await self._issue_page(owner, name, labels, "UPDATED_AT", cursor, on_wait)
             issues.extend(parse_issue(node) for node in page["nodes"])
             if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+        return tuple(issues)
+
+    # GitHub has no filter on the opening date of a repo's issues, its since
+    # looks at updates. So the list comes newest first and reading stops at the
+    # first page that reaches past the date.
+    async def recent_issues(self, owner: str, name: str, since: datetime, on_wait: WaitListener | None = None) -> tuple[Issue, ...]:
+        """Fetches a repo's open issues opened since a date, with or without labels.
+
+        Args:
+            owner: The user or organization that owns the repo.
+            name: The repo name.
+            since: The oldest opening date to keep.
+            on_wait: Called before every wait caused by a limit or a server
+                error. When missing, waits are logged as warnings.
+
+        Returns:
+            The issues, newest first.
+
+        Raises:
+            GitHubAuthError: The token was rejected.
+            GitHubQueryError: GitHub could not answer, for example the repo does not exist.
+            httpx.HTTPStatusError: GitHub kept failing after every retry.
+        """
+        issues: list[Issue] = []
+        cursor = None
+        for _ in range(MAX_PAGES):
+            page = await self._issue_page(owner, name, None, "CREATED_AT", cursor, on_wait)
+            found = [parse_issue(node) for node in page["nodes"]]
+            issues.extend(issue for issue in found if issue.created_at >= since)
+            if (found and found[-1].created_at < since) or not page["pageInfo"]["hasNextPage"]:
                 break
             cursor = page["pageInfo"]["endCursor"]
         return tuple(issues)

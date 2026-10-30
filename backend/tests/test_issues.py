@@ -20,7 +20,7 @@ from merge_hunt.domain.issues import FeedbackValue, IssueFilter, is_shown
 from merge_hunt.domain.models import Actor, Issue, IssueComment, RepoRef
 from merge_hunt.github.client import GitHubAuthError, GitHubQueryError
 from merge_hunt.pipeline.issue_analysis import CLAIM_MAX_LENGTH, RuleIssueAnalyzer
-from merge_hunt.pipeline.issue_finder import IssueFetchError, IssueFinder
+from merge_hunt.pipeline.issue_finder import RECENT_ISSUE_DAYS, IssueFetchError, IssueFinder
 from merge_hunt.storage.database import create_engine, create_tables
 from merge_hunt.storage.stores import IssueStore, RepoNotFoundError, RepoStore
 from merge_hunt.storage.tables import IssueCommentRow, IssueFeedbackRow, IssueRow
@@ -50,6 +50,7 @@ def claimed(*bodies: str):
 class FakeClient:
     def __init__(self, answers: dict) -> None:
         self.answers = answers
+        self.recent: dict = {}
         self.calls: list = []
 
     async def issues(self, owner, name, labels, on_wait=None):
@@ -58,6 +59,10 @@ class FakeClient:
         if isinstance(answer, Exception):
             raise answer
         return answer
+
+    async def recent_issues(self, owner, name, since, on_wait=None):
+        self.since = since
+        return self.recent.get(name, ())
 
 # Gives body a database with both repos saved, the store and the session maker.
 def run(body):
@@ -223,8 +228,12 @@ def test_refresh_wraps_every_fetch_error(error):
 
     run(body)
 
-def test_load_filters_analyzes_and_keeps_order():
-    issues = (make_issue(1, comments=(comment("I'll take it"),)), make_issue(2, assigned=True), make_issue(3))
+def test_load_filters_analyzes_and_puts_the_newest_first():
+    issues = (
+        make_issue(1, created_at=NOW - timedelta(days=900), comments=(comment("I'll take it"),)),
+        make_issue(2, assigned=True),
+        make_issue(3, created_at=NOW - timedelta(days=3)),
+    )
 
     async def body(store, _):
         await store.save(CLICK.id, issues, ("easy",), NOW)
@@ -232,8 +241,8 @@ def test_load_filters_analyzes_and_keeps_order():
 
     answer = run(body)
     assert answer.fetched_at == NOW and answer.labels == ("easy",)
-    assert [item.issue.number for item in answer.issues] == [1, 3]
-    assert answer.issues[0].analysis.claimed_at == NOW and answer.issues[1].analysis.claimed_at is None
+    assert [item.issue.number for item in answer.issues] == [3, 1]
+    assert answer.issues[0].analysis.claimed_at is None and answer.issues[1].analysis.claimed_at == NOW
 
 def test_load_of_never_fetched_repo_has_no_time():
     async def body(store, _):
@@ -241,6 +250,19 @@ def test_load_of_never_fetched_repo_has_no_time():
 
     answer = run(body)
     assert answer.fetched_at is None and answer.issues == ()
+
+def test_find_adds_recent_issues_without_doubling_any():
+    labelled = make_issue(1)
+    both = make_issue(2)
+    client = FakeClient({"click": (labelled, both)})
+    client.recent["click"] = (both, make_issue(3, labels=()))
+
+    async def body(store, _):
+        await IssueFinder(client, store, RuleIssueAnalyzer(), lambda: NOW).find([CLICK], ("easy",))
+        return await store.load(CLICK.id)
+
+    assert sorted(issue.number for issue in run(body).issues) == [1, 2, 3]
+    assert client.since == NOW - timedelta(days=RECENT_ISSUE_DAYS)
 
 def test_refresh_keeps_the_labels_of_the_last_fetch():
     async def body(store, _):

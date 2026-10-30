@@ -369,6 +369,9 @@ class FakeIssueClient:
             raise self.error
         return (api_issue(1),)
 
+    async def recent_issues(self, owner, name, since, on_wait=None):
+        return ()
+
 def test_repo_issues_are_filtered_and_analyzed(tmp_path):
     async def body(client, _):
         state = client._transport.app.state
