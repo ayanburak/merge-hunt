@@ -1,0 +1,88 @@
+.filters {
+  display: grid;
+  grid-template-columns: var(--columns);
+  gap: 0 28px;
+  align-items: start;
+  padding: 14px var(--gutter) 12px;
+  background: #f7f7f3;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink-3);
+}
+
+.intro {
+  grid-column: span 2;
+  padding-right: 20px;
+}
+
+.intro b {
+  display: block;
+  font-size: 24px;
+  font-stretch: 74%;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.intro p {
+  max-width: 280px;
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+.intro button {
+  margin-top: 5px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.intro button:hover {
+  color: var(--ink);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.row input {
+  width: 58px;
+  height: 32px;
+  padding: 0 7px;
+  background: #fff;
+  border: 1px solid var(--ink-3);
+  border-radius: 0;
+  outline: 0;
+  font-size: 17px;
+  font-stretch: 86%;
+  font-weight: 600;
+  text-align: right;
+  color: var(--ink);
+}
+
+.row input:hover {
+  border-color: var(--ink);
+}
+
+.row input:focus {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.row input::placeholder {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.effect {
+  font-size: 13px;
+  color: var(--ink-2);
+}

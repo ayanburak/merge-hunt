@@ -1,0 +1,20 @@
+/*
+ * file: src/styles/tokens.css
+ * description: The colours, spacing and easing every page shares.
+ */
+
+/* Gold is a fill and a colour for dark ground. Its contrast on paper is too low for text, so light ground uses ink there. */
+
+:root {
+  --paper: #e9eae5;
+  --ink: #141619;
+  --gold: #e5b32e;
+  --paper-2: rgb(233 234 229 / .62);
+  --paper-3: rgb(233 234 229 / .3);
+  --paper-4: rgb(233 234 229 / .13);
+  --ink-2: rgb(20 22 25 / .62);
+  --ink-3: rgb(20 22 25 / .28);
+  --ink-4: rgb(20 22 25 / .12);
+  --gutter: clamp(20px, 3.4vw, 56px);
+  --fall: cubic-bezier(.5, 0, .2, 1);
+}

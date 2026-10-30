@@ -1,0 +1,57 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  height: 64px;
+  padding: 0 var(--gutter);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-stretch: 112%;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  text-decoration: none;
+}
+
+.mark svg {
+  display: block;
+}
+
+.nav {
+  display: flex;
+  gap: 24px;
+}
+
+.nav a,
+.nav span {
+  position: relative;
+  padding: 4px 0;
+  text-decoration: none;
+  color: var(--ink-2);
+}
+
+.nav span {
+  opacity: .6;
+}
+
+.nav a:hover {
+  color: var(--ink);
+}
+
+.nav a[aria-current] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.nav a[aria-current]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: var(--ink);
+}

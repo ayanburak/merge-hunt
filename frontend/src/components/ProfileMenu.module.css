@@ -1,0 +1,132 @@
+.profile {
+  position: relative;
+}
+
+.button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 3px;
+  border-bottom: 2px solid var(--ink-3);
+  transition: border-color .15s;
+}
+
+.button:hover {
+  border-color: var(--ink);
+}
+
+.button span {
+  color: var(--ink-2);
+}
+
+.button b {
+  font-weight: 600;
+}
+
+.menu {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  right: 0;
+  width: 300px;
+  margin-top: 8px;
+  padding: 8px 0;
+  background: var(--ink);
+  color: var(--paper);
+  transform-origin: top;
+  animation: open .16s var(--fall);
+}
+
+.menu :focus-visible {
+  outline-color: var(--gold);
+}
+
+@keyframes open {
+  from {
+    opacity: 0;
+    transform: scaleY(.92);
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.item:hover {
+  background: var(--paper-4);
+}
+
+.item > button:first-child {
+  flex: 1;
+  padding: 9px 18px;
+  text-align: left;
+}
+
+.item[data-current] > button:first-child {
+  font-weight: 700;
+}
+
+.item small {
+  padding-right: 18px;
+  color: var(--paper-2);
+}
+
+.remove {
+  padding: 9px 18px 9px 0;
+  color: var(--paper-2);
+  opacity: 0;
+}
+
+.item:hover .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+
+.remove:hover,
+.remove[data-sure] {
+  color: var(--gold);
+  opacity: 1;
+}
+
+.menu form {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px 18px 8px;
+  border-top: 1px solid var(--paper-4);
+}
+
+.menu input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--paper-3);
+  outline: 0;
+}
+
+.menu input:focus {
+  border-bottom-color: var(--gold);
+}
+
+.menu input::placeholder {
+  color: var(--paper-2);
+}
+
+.menu form button {
+  font-weight: 600;
+}
+
+.menu form button:hover {
+  color: var(--gold);
+}
+
+.problem {
+  padding: 0 18px 8px;
+  font-size: 13px;
+  color: var(--gold);
+}

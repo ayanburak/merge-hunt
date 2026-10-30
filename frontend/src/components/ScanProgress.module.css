@@ -1,0 +1,279 @@
+.watch {
+  animation: appear .3s;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+.steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.steps li + li::before {
+  content: "";
+  width: 44px;
+  height: 1px;
+  margin-right: 8px;
+  background: var(--ink-3);
+}
+
+.steps i {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--ink-3);
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.steps li[data-state="now"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.steps li[data-state="now"] i {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.steps li[data-state="done"] {
+  color: var(--ink);
+}
+
+.steps li[data-state="done"] i {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.steps li[data-state="stopped"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.steps li[data-state="stopped"] i {
+  background: var(--gold);
+  border-color: var(--ink);
+}
+
+.recap {
+  margin-top: 14px;
+  color: var(--ink-2);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 320px);
+  gap: 0 56px;
+  align-items: center;
+  min-height: 380px;
+  padding: 18px 0;
+}
+
+.count {
+  display: flex;
+  align-items: baseline;
+  gap: .12em;
+  font-size: clamp(96px, 13.5vw, 196px);
+  font-stretch: 62%;
+  font-weight: 300;
+  line-height: .95;
+  letter-spacing: -.035em;
+}
+
+.count span {
+  font-size: .3em;
+  font-stretch: 78%;
+  color: var(--ink-2);
+  letter-spacing: -.01em;
+}
+
+.headline {
+  max-width: 820px;
+  font-size: clamp(38px, 5vw, 72px);
+  font-stretch: 70%;
+  font-weight: 300;
+  line-height: 1.04;
+  letter-spacing: -.02em;
+}
+
+.detail {
+  max-width: 640px;
+  margin-top: 12px;
+  font-size: 16px;
+  color: var(--ink-2);
+}
+
+.detail b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.failures {
+  max-width: 640px;
+  margin-top: 12px;
+  font-size: 16px;
+  color: var(--ink-2);
+}
+
+.failures ul {
+  max-height: 150px;
+  margin-top: 8px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 14px;
+}
+
+.failures li {
+  padding: 6px 0;
+  border-top: 1px solid var(--ink-4);
+}
+
+.failures b {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-height: 46px;
+  margin-top: 18px;
+}
+
+.actions:empty {
+  display: none;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  height: 46px;
+  padding: 0 22px;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+
+.link:hover {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.text {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.text:hover {
+  color: var(--ink);
+}
+
+.tally div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 28px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ink-4);
+  color: var(--ink-2);
+}
+
+.tally b {
+  font-size: 22px;
+  font-weight: 500;
+  font-stretch: 80%;
+  color: var(--ink);
+}
+
+.legend {
+  display: flex;
+  gap: 22px;
+  padding-bottom: 10px;
+  color: var(--ink-2);
+}
+
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.legend i {
+  width: 10px;
+  height: 10px;
+  background: var(--ink);
+}
+
+.legend [data-kind="failed"] i {
+  background: var(--gold);
+}
+
+.legend [data-kind="left"] i {
+  background: var(--ink-3);
+}
+
+.progress {
+  position: relative;
+  display: flex;
+  height: 12px;
+  overflow: hidden;
+  background: var(--ink-4);
+}
+
+.progress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--ink);
+  transition: width .5s var(--fall);
+}
+
+.progress i + i {
+  background: var(--gold);
+}
+
+.progress[data-seeking] i:first-child {
+  position: absolute;
+  width: 16%;
+  animation: seek 2s var(--fall) infinite alternate;
+}
+
+@keyframes seek {
+  from {
+    left: 0;
+  }
+
+  to {
+    left: 84%;
+  }
+}
+
+@media (max-width: 1000px) {
+  .body {
+    grid-template-columns: 1fr;
+  }
+}

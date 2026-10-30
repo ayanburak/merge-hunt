@@ -1,0 +1,104 @@
+.basin {
+  position: relative;
+  z-index: 1;
+  min-height: 26vh;
+  padding: 44px var(--gutter) 90px;
+  color: var(--paper);
+}
+
+.basin :focus-visible {
+  outline-color: var(--gold);
+}
+
+.basin h2 {
+  margin-bottom: 14px;
+  font-size: 22px;
+  font-stretch: 78%;
+  font-weight: 400;
+}
+
+.note {
+  color: var(--paper-2);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 170px minmax(200px, 1fr) 72px 72px 72px 84px 110px;
+  align-items: center;
+  gap: 18px;
+  min-height: 60px;
+  padding: 8px 0;
+  border-top: 1px solid var(--paper-4);
+  text-decoration: none;
+  transition: padding .2s var(--fall);
+}
+
+a.row:hover {
+  padding-left: 10px;
+}
+
+.head {
+  min-height: 0;
+  padding: 0 0 8px;
+  border: 0;
+  font-size: 13px;
+  color: var(--paper-2);
+}
+
+.when {
+  font-weight: 500;
+}
+
+.when small {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--paper-2);
+}
+
+.search {
+  color: var(--paper-2);
+}
+
+.search b {
+  font-weight: 500;
+  color: var(--paper);
+}
+
+.num {
+  text-align: right;
+  font-size: 18px;
+  font-stretch: 82%;
+}
+
+.head .num {
+  font-size: 13px;
+  font-stretch: 100%;
+}
+
+.num[data-zero] {
+  color: var(--paper-3);
+}
+
+.status {
+  text-align: right;
+  font-size: 14px;
+  color: var(--paper-2);
+}
+
+.status[data-bad] {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+@media (max-width: 1000px) {
+  .row {
+    grid-template-columns: 130px minmax(0, 1fr) 62px 90px;
+  }
+
+  .row > :nth-child(3),
+  .row > :nth-child(5),
+  .row > :nth-child(6) {
+    display: none;
+  }
+}

@@ -1,0 +1,54 @@
+/*
+ * file: src/styles/base.css
+ * description: Element defaults for the whole app. Anything that belongs to one component goes to its own module.
+ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html {
+  background: var(--ink);
+}
+
+body {
+  font-family: "Archivo Variable", "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

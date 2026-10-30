@@ -1,0 +1,51 @@
+.range {
+  display: block;
+  width: 100%;
+  height: 26px;
+  margin: 5px 0 0;
+  appearance: none;
+  background: none;
+  cursor: grab;
+}
+
+.range:active {
+  cursor: grabbing;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(90deg, var(--ink-4) var(--a), var(--ink) var(--a), var(--ink) var(--b), var(--ink-4) var(--b));
+}
+
+.range::-moz-range-track {
+  height: 6px;
+  background: linear-gradient(90deg, var(--ink-4) var(--a), var(--ink) var(--a), var(--ink) var(--b), var(--ink-4) var(--b));
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+  background: var(--gold);
+  border: 2px solid var(--thumb-edge, #f7f7f3);
+  border-radius: 0;
+  outline: 1px solid var(--ink);
+}
+
+.range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--gold);
+  border: 2px solid var(--thumb-edge, #f7f7f3);
+  border-radius: 0;
+  outline: 1px solid var(--ink);
+}
+
+.range[data-off]::-webkit-slider-thumb {
+  background: var(--ink);
+}
+
+.range[data-off]::-moz-range-thumb {
+  background: var(--ink);
+}

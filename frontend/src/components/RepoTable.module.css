@@ -1,0 +1,294 @@
+.columns {
+  display: grid;
+  grid-template-columns: var(--columns);
+  gap: 0 28px;
+  align-items: center;
+  height: 34px;
+  padding: 0 var(--gutter);
+}
+
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.label:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.label em {
+  font-style: normal;
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.rows {
+  position: relative;
+}
+
+.ground {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--edge);
+  background: var(--paper);
+  transition: height .8s var(--fall);
+}
+
+.row {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  transform: translateY(var(--y));
+  transition: transform .8s var(--fall), color .6s;
+  transition-delay: var(--delay, 0ms);
+}
+
+.main {
+  display: grid;
+  grid-template-columns: var(--columns);
+  gap: 0 28px;
+  align-items: center;
+  width: 100%;
+  height: 62px;
+  padding: 0 var(--gutter);
+  text-align: left;
+  border-top: 1px solid var(--ink-4);
+  transition: border-color .6s;
+}
+
+.row[data-under] {
+  color: var(--paper);
+}
+
+.row[data-under] :focus-visible {
+  outline-color: var(--gold);
+}
+
+.row[data-under] .main {
+  border-top-color: var(--paper-4);
+}
+
+.row:hover .main {
+  background: rgb(20 22 25 / .04);
+}
+
+.row[data-under]:hover .main {
+  background: rgb(233 234 229 / .05);
+}
+
+.name {
+  min-width: 0;
+}
+
+.title {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.003em;
+}
+
+.title span {
+  font-weight: 400;
+  opacity: .62;
+}
+
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  margin-top: 1px;
+  white-space: nowrap;
+  font-size: 13px;
+  opacity: .66;
+}
+
+.row[data-under] .title {
+  font-weight: 500;
+}
+
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.flag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+}
+
+.flag[data-warn]::before {
+  background: var(--gold);
+}
+
+.score {
+  font-size: 25px;
+  font-stretch: 72%;
+  font-weight: 500;
+}
+
+.row[data-under] .score {
+  font-weight: 300;
+  opacity: .72;
+}
+
+.cell {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.cell b {
+  font-size: 21px;
+  font-stretch: 78%;
+  font-weight: 400;
+}
+
+.cell small {
+  font-size: 13px;
+  opacity: .58;
+}
+
+.row[data-under] .cell b {
+  opacity: .72;
+}
+
+.cell[data-none] b {
+  opacity: .4;
+}
+
+.row .cell[data-failed] b {
+  color: var(--gold);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .4s var(--fall);
+}
+
+.row[data-open] .more {
+  grid-template-rows: 1fr;
+}
+
+.moreInner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(250px, 1.75fr) minmax(240px, 2fr) minmax(200px, 1.4fr);
+  gap: 32px;
+  height: 160px;
+  padding: 8px var(--gutter) 22px;
+}
+
+.detail h4 {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  opacity: .6;
+}
+
+.why {
+  overflow-y: auto;
+  font-size: 15px;
+  line-height: 1.38;
+}
+
+.why p + p {
+  margin-top: 5px;
+  opacity: .72;
+}
+
+.topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.spec {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+}
+
+.spec span {
+  opacity: .6;
+}
+
+.github {
+  display: inline-block;
+  margin-top: 7px;
+  font-weight: 600;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.github:hover {
+  text-decoration-thickness: 2px;
+}
+
+.row[data-under] .github:hover {
+  color: var(--gold);
+}
+
+.line {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 76px;
+  padding: 0 var(--gutter);
+  color: var(--paper);
+  transform: translateY(var(--edge));
+  transition: transform .8s var(--fall), opacity .3s;
+}
+
+.line strong {
+  font-size: 25px;
+  font-stretch: 72%;
+  font-weight: 400;
+  letter-spacing: -.008em;
+}
+
+.line span {
+  color: var(--paper-2);
+}
+
+@media (max-width: 1040px) {
+  .columns,
+  .rows {
+    min-width: 980px;
+  }
+
+  .detail {
+    grid-template-columns: 1fr 1fr;
+    height: auto;
+  }
+}
