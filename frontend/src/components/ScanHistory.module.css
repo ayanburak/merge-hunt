@@ -115,3 +115,14 @@ button.row:hover {
     display: none;
   }
 }
+
+@media (max-width: 480px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) 62px 90px;
+    gap: 12px;
+  }
+
+  .row > :nth-child(2) {
+    display: none;
+  }
+}

@@ -76,6 +76,15 @@ select.box {
   padding: 0 6px;
 }
 
+@media (max-width: 480px) {
+  .segments .choice {
+    height: auto;
+    min-height: 40px;
+    line-height: 1.15;
+    white-space: normal;
+  }
+}
+
 .segments .choice + .choice {
   margin-left: -1px;
 }
