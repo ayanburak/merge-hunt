@@ -1,6 +1,6 @@
 """
 file: schemas.py
-importable: ScanRequest, ScanCreated
+importable: ScanRequest, ScanCreated, ProfileSettings, ProfileWrite, ProfileAnswer
 
 The shapes the API accepts and returns where a domain class does not fit
 as it is. Values coming from outside are checked here with Pydantic, so the
@@ -11,11 +11,17 @@ the field that was wrong.
 description: Request and response bodies of the API and the checks on them.
 """
 
-from typing import Self
+# XXX: A body with a bare NaN is refused by ProfileSettings, but FastAPI's 422
+# answer repeats the input and JSON can not carry NaN, so the client gets a 500.
+# NaN is not valid JSON and no browser sends it, the request is refused either way.
 
-from pydantic import BaseModel, Field, model_validator
+from datetime import datetime
+from typing import Annotated, Self
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from merge_hunt.domain.metrics import MetricOptions
+from merge_hunt.domain.scoring import FilterProfile, Range, SavedProfile, Weights
 from merge_hunt.pipeline.discovery import MAX_CANDIDATES, DiscoveryOptions, SearchSort
 
 # --- Scans ---
@@ -54,3 +60,79 @@ class ScanRequest(BaseModel):
 
 class ScanCreated(BaseModel):
     id: int
+
+# --- Profiles ---
+
+# The fields are the domain's own dataclasses, so the defaults live only in
+# FilterProfile and are not repeated here like in ScanRequest. Pydantic checks
+# the types of those dataclasses and the validator below their values.
+# allow_inf_nan is off because a NaN weight would make a score JSON can not carry.
+_DEFAULT = FilterProfile()
+
+class ProfileSettings(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    metrics: MetricOptions = _DEFAULT.metrics
+    commits: Range = _DEFAULT.commits
+    merge_rate: Range = _DEFAULT.merge_rate
+    ignored_rate: Range = _DEFAULT.ignored_rate
+    response_days: Range = _DEFAULT.response_days
+    weights: Weights = _DEFAULT.weights
+    commit_target: int = Field(_DEFAULT.commit_target, ge=0)
+    hide_insufficient: bool = _DEFAULT.hide_insufficient
+
+    @model_validator(mode="after")
+    def _values_make_sense(self) -> Self:
+        ranges = {
+            "commits": self.commits,
+            "merge_rate": self.merge_rate,
+            "ignored_rate": self.ignored_rate,
+            "response_days": self.response_days,
+        }
+        for name, allowed in ranges.items():
+            ends = [end for end in (allowed.low, allowed.high) if end is not None]
+            if any(end < 0 for end in ends):
+                raise ValueError(f"{name} has a negative end")
+            if len(ends) == 2 and allowed.low > allowed.high:
+                raise ValueError(f"{name} has a low end above its high end")
+        for name in ("merge_rate", "ignored_rate"):
+            if any(end is not None and end > 1 for end in (ranges[name].low, ranges[name].high)):
+                raise ValueError(f"{name} is a rate, its ends can not be above 1")
+        weights = self.weights
+        if min(weights.merge_rate, weights.ignored_rate, weights.response_days, weights.commits) < 0:
+            raise ValueError("weights can not be negative")
+        metrics = self.metrics
+        if min(metrics.external_until_merges, metrics.ignored_after_days) < 0:
+            raise ValueError("external_until_merges and ignored_after_days can not be negative")
+        if min(metrics.window_days, metrics.commit_days, metrics.min_sample) < 1:
+            raise ValueError("window_days, commit_days and min_sample have to be at least 1")
+        return self
+
+    def filter_profile(self) -> FilterProfile:
+        return FilterProfile(**dict(self))
+
+ProfileName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+# The body of POST /profiles and PUT /profiles/{id}.
+class ProfileWrite(BaseModel):
+    name: ProfileName
+    settings: ProfileSettings = ProfileSettings()
+
+# How a saved profile goes out. The settings pass through ProfileSettings, that
+# fills in fields added after the profile was saved.
+class ProfileAnswer(BaseModel):
+    id: int
+    name: str
+    settings: ProfileSettings
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, saved: SavedProfile) -> Self:
+        return cls(
+            id=saved.id,
+            name=saved.name,
+            settings=ProfileSettings.model_validate(saved.settings),
+            created_at=saved.created_at,
+            updated_at=saved.updated_at,
+        )

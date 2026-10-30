@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from merge_hunt.domain.metrics import MetricOptions
-from merge_hunt.domain.models import Actor, Commit, PullRequest, Repo
-from merge_hunt.domain.scoring import INSUFFICIENT_DATA, FilterProfile, Range, Weights, score_repo, wilson_bounds
+from merge_hunt.domain.models import Actor, Commit, CommitHistory, Enrichment, PullRequest, PullRequestHistory, Repo
+from merge_hunt.domain.scoring import INSUFFICIENT_DATA, FilterProfile, Range, Weights, covers_window, score_repo, wilson_bounds
 
 # --- Helpers ---
 
@@ -85,7 +85,7 @@ def test_failed_filters_are_named():
     assert result.failed_filters == ("commits", "merge_rate")
 
 def test_ignored_rate_filter_uses_upper_end():
-    prs = good_prs() + [unanswered() for _ in range(10)]
+    prs = good_prs() + [unanswered() for _ in range(15)]
     assert score_repo(REPO, prs, commits(30), PROFILE, NOW).failed_filters == ("ignored_rate",)
 
 def test_response_days_filter_off_by_default_and_works_when_set():
@@ -149,3 +149,18 @@ def test_commit_part_caps_at_target():
 def test_metric_options_reach_the_metrics():
     profile = replace(PROFILE, metrics=MetricOptions(min_sample=1))
     assert score_repo(REPO, [merged()], [], profile, NOW).metrics.merge_rate == 1.0
+
+# --- covers_window ---
+
+def test_covers_window_looks_at_both_histories():
+    options = MetricOptions(window_days=100, commit_days=50)
+    start = NOW - timedelta(days=100)
+    commits_start = NOW - timedelta(days=50)
+    late = NOW - timedelta(days=99)
+
+    def enrichment(prs_since, commits_since):
+        return Enrichment(NOW, PullRequestHistory((), prs_since, prs_since), CommitHistory((), commits_since, commits_since))
+
+    assert covers_window(enrichment(start, commits_start), options, NOW)
+    assert not covers_window(enrichment(late, commits_start), options, NOW)
+    assert not covers_window(enrichment(start, NOW - timedelta(days=49)), options, NOW)

@@ -1,6 +1,6 @@
 """
 file: stores.py
-importable: RepoStore, ScanStore, RepoNotFoundError
+importable: RepoStore, ScanStore, ProfileStore, RepoNotFoundError, ProfileNameTakenError
 
 RepoStore reads and writes a repo, what discovery found out about it and its
 raw enrichment data. It is built
@@ -21,7 +21,10 @@ ScanStore keeps the scans, their state, counts and the repos each one sent to
 enrichment. Every call is its own transaction too, so the UI reading a scan in
 the middle of it always sees the last finished step.
 
-description: Saves and loads repos, their pull request and commit data, and scans.
+ProfileStore keeps the user's named profiles. It takes their settings as a
+JSON dict, turning that into a FilterProfile is the API's job.
+
+description: Saves and loads repos, their pull request and commit data, scans and profiles.
 """
 
 # NOTE: save_enrichment does not merge with what is already there, it deletes
@@ -33,6 +36,7 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -49,13 +53,26 @@ from merge_hunt.domain.models import (
     RepoRef,
 )
 from merge_hunt.domain.scans import Scan, ScanStage, ScanStatus
-from merge_hunt.storage.tables import CommitRow, InteractionRow, PullRequestRow, RepoRow, ScanRepoRow, ScanRow
+from merge_hunt.domain.scoring import SavedProfile
+from merge_hunt.storage.tables import (
+    CommitRow,
+    InteractionRow,
+    ProfileRow,
+    PullRequestRow,
+    RepoRow,
+    ScanRepoRow,
+    ScanRow,
+)
 
 # --- Errors ---
 
 # Raised when enrichment data is saved for a repo save_repo never saw. That is
 # a mistake in the calling code and not something to retry.
 class RepoNotFoundError(LookupError):
+    pass
+
+# Raised when a profile is saved under a name another profile already has.
+class ProfileNameTakenError(ValueError):
     pass
 
 # --- Domain to Rows ---
@@ -141,6 +158,9 @@ def _scan(row: ScanRow) -> Scan:
         waiting_until=row.waiting_until,
         error=row.error,
     )
+
+def _profile(row: ProfileRow) -> SavedProfile:
+    return SavedProfile(row.id, row.name, row.settings, row.created_at, row.updated_at)
 
 # --- Store ---
 
@@ -392,3 +412,86 @@ class ScanStore:
         async with self._sessions() as session:
             row = await session.get(ScanRow, scan_id)
             return None if row is None else _scan(row)
+
+    # Newest first, the UI takes the first one as the scan to show.
+    async def recent(self, limit: int) -> list[Scan]:
+        """Loads the latest scans, at most limit of them, newest first."""
+        async with self._sessions() as session:
+            rows = await session.scalars(select(ScanRow).order_by(ScanRow.id.desc()).limit(limit))
+            return [_scan(row) for row in rows]
+
+    async def repo_ids(self, scan_id: int) -> list[int]:
+        """Gives the ids of the repos the scan sent to enrichment."""
+        async with self._sessions() as session:
+            rows = await session.scalars(select(ScanRepoRow.repo_id).where(ScanRepoRow.scan_id == scan_id))
+            return list(rows)
+
+# The profile names are unique, the database checks that, so two requests can
+# not slip past each other the way they could with a look before the write.
+class ProfileStore:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    async def create(self, name: str, settings: dict, at: datetime) -> SavedProfile:
+        """Saves a new profile.
+
+        Args:
+            name: The profile's name.
+            settings: Its settings, has to fit in JSON.
+            at: When it was saved, timezone aware.
+
+        Returns:
+            The saved profile with its new id.
+
+        Raises:
+            ProfileNameTakenError: Another profile has this name.
+        """
+        try:
+            async with self._sessions.begin() as session:
+                row = ProfileRow(name=name, settings=settings, created_at=at, updated_at=at)
+                session.add(row)
+                await session.flush()
+                return _profile(row)
+        except IntegrityError:
+            raise ProfileNameTakenError(f"A profile named {name!r} already exists") from None
+
+    async def all(self) -> list[SavedProfile]:
+        """Loads every profile, sorted by name."""
+        async with self._sessions() as session:
+            rows = await session.scalars(select(ProfileRow).order_by(ProfileRow.name))
+            return [_profile(row) for row in rows]
+
+    async def load(self, profile_id: int) -> SavedProfile | None:
+        """Loads a profile, None when there is no profile with this id."""
+        async with self._sessions() as session:
+            row = await session.get(ProfileRow, profile_id)
+            return None if row is None else _profile(row)
+
+    async def update(self, profile_id: int, name: str, settings: dict, at: datetime) -> SavedProfile | None:
+        """Replaces a profile's name and settings.
+
+        Returns:
+            The changed profile, None when there is no profile with this id.
+
+        Raises:
+            ProfileNameTakenError: Another profile has this name.
+        """
+        try:
+            async with self._sessions.begin() as session:
+                row = await session.get(ProfileRow, profile_id)
+                if row is None:
+                    return None
+                row.name, row.settings, row.updated_at = name, settings, at
+                await session.flush()
+                return _profile(row)
+        except IntegrityError:
+            raise ProfileNameTakenError(f"A profile named {name!r} already exists") from None
+
+    async def delete(self, profile_id: int) -> bool:
+        """Deletes a profile, False when there was none with this id."""
+        async with self._sessions.begin() as session:
+            row = await session.get(ProfileRow, profile_id)
+            if row is None:
+                return False
+            await session.delete(row)
+            return True

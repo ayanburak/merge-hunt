@@ -1,6 +1,6 @@
 """
 file: scoring.py
-importable: Range, Weights, FilterProfile, ScoredRepo, wilson_bounds, score_repo, INSUFFICIENT_DATA
+importable: Range, Weights, FilterProfile, SavedProfile, ScoredRepo, wilson_bounds, covers_window, score_repo, INSUFFICIENT_DATA
 
 score_repo(repo, prs, commits, profile, now) is the entry point, it works out a
 repo's metrics with metrics.py, checks them against the user's FilterProfile
@@ -20,6 +20,10 @@ than 200 out of 200. They go in even below min_sample, the bound already
 pulls a small sample down, and with no pull request at all both parts are 0.
 Only a missing response time is left out, its weight is shared by the others.
 
+covers_window tells whether the saved data reaches as far back as the profile
+asks. When it does not the metrics are still worked out from what is there,
+score_repo only passes the answer on in window_covered, so the UI can warn.
+
 description: Filters and scores a repo against the user's profile from its raw data.
 """
 
@@ -36,11 +40,11 @@ description: Filters and scores a repo against the user's profile from its raw d
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import sqrt
 
 from merge_hunt.domain.metrics import MetricOptions, RepoMetrics, compute_metrics, count_commits
-from merge_hunt.domain.models import Commit, PullRequest, Repo
+from merge_hunt.domain.models import Commit, Enrichment, PullRequest, Repo
 
 # --- Constants ---
 
@@ -78,16 +82,29 @@ class FilterProfile:
     metrics: MetricOptions = MetricOptions()
     commits: Range = Range(low=10)
     merge_rate: Range = Range(low=0.5)
-    ignored_rate: Range = Range(high=0.3)
+    ignored_rate: Range = Range(high=0.4)
     response_days: Range = Range()
     weights: Weights = Weights()
     commit_target: int = 60
     hide_insufficient: bool = False
 
+# A profile the user gave a name. settings is the JSON it was saved as, new
+# fields added to the profile later are filled in with defaults when it is read,
+# so an old row keeps working without a migration.
+@dataclass(frozen=True, slots=True)
+class SavedProfile:
+    id: int
+    name: str
+    settings: dict
+    created_at: datetime
+    updated_at: datetime
+
 # --- Result ---
 
 # metrics and commit_count are kept so the UI can show the numbers behind the
-# score and the reason a repo failed.
+# score and the reason a repo failed. window_covered is False when the saved
+# data starts later than the profile's windows, the metrics are then based on
+# less time than the user asked for.
 @dataclass(frozen=True, slots=True)
 class ScoredRepo:
     repo: Repo
@@ -96,6 +113,7 @@ class ScoredRepo:
     score: float
     failed_filters: tuple[str, ...]
     insufficient: bool
+    window_covered: bool = True
 
     @property
     def passed(self) -> bool:
@@ -127,6 +145,15 @@ def wilson_bounds(part: int, whole: int, z: float = Z_95) -> tuple[float, float]
     spread = z * sqrt(rate * (1 - rate) / whole + z2 / (4 * whole * whole))
     return (center - spread) / (1 + z2 / whole), (center + spread) / (1 + z2 / whole)
 
+# complete_since is what counts and not requested_since, a fetch cut by the
+# page limit also leaves the window short.
+def covers_window(enrichment: Enrichment, options: MetricOptions, now: datetime) -> bool:
+    """Tells whether the saved data reaches back as far as the options ask."""
+    return (
+        enrichment.prs.complete_since <= now - timedelta(days=options.window_days)
+        and enrichment.commits.complete_since <= now - timedelta(days=options.commit_days)
+    )
+
 # commit_target and ignored_after_days come from the UI, a zero there would
 # divide by zero, so zero means full marks for commits and no marks for
 # response time, where every pull request already counts as ignored.
@@ -152,6 +179,7 @@ def score_repo(
     commits: Iterable[Commit],
     profile: FilterProfile,
     now: datetime,
+    window_covered: bool = True,
 ) -> ScoredRepo:
     """Checks one repo against the user's filters and scores it.
 
@@ -161,6 +189,7 @@ def score_repo(
         commits: Every stored commit of the repo.
         profile: The user's filters, weights and metric settings.
         now: The moment the windows are counted back from.
+        window_covered: Copied to the result, see covers_window.
 
     Returns:
         The repo with its metrics, score and the names of the filters it
@@ -178,4 +207,5 @@ def score_repo(
     failed = [name for name, allowed, value in checks if value is not None and not allowed.contains(value)]
     if insufficient and profile.hide_insufficient:
         failed.append(INSUFFICIENT_DATA)
-    return ScoredRepo(repo, metrics, commit_count, _score(metrics, commit_count, profile), tuple(failed), insufficient)
+    score = _score(metrics, commit_count, profile)
+    return ScoredRepo(repo, metrics, commit_count, score, tuple(failed), insufficient, window_covered)

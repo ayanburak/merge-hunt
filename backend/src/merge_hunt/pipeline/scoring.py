@@ -18,7 +18,7 @@ description: Scores the saved repos against the user's profile and sorts them.
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 
-from merge_hunt.domain.scoring import FilterProfile, ScoredRepo, score_repo
+from merge_hunt.domain.scoring import FilterProfile, ScoredRepo, covers_window, score_repo
 from merge_hunt.storage.stores import RepoStore
 
 # clock is passed in like in Enricher, so tests can fix the day the windows
@@ -49,6 +49,7 @@ class Scorer:
             enrichment = await self._store.load_enrichment(repo_id)
             if repo is None or enrichment is None:
                 continue
-            results.append(score_repo(repo, enrichment.prs.prs, enrichment.commits.commits, profile, now))
+            covered = covers_window(enrichment, profile.metrics, now)
+            results.append(score_repo(repo, enrichment.prs.prs, enrichment.commits.commits, profile, now, covered))
         results.sort(key=lambda item: (not item.passed, -item.score))
         return results

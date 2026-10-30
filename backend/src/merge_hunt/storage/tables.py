@@ -157,3 +157,13 @@ class ScanRepoRow(Base):
     repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id"))
     status: Mapped[str | None]
     error: Mapped[str | None]
+
+# settings is the JSON form of a ProfileSettings, new fields need no migration.
+class ProfileRow(Base):
+    __tablename__ = "profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(unique=True)
+    settings: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime)
