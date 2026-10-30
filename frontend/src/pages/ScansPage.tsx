@@ -4,10 +4,10 @@
  * description: Starts a scan, follows its progress and lists earlier scans.
  */
 
-// picked is the scan on screen, one started here or a running one found in the list. The second
-// covers a reload and a scan started from another tab. It is kept in picked so the scan stays on
-// screen after it ends, by then the list no longer calls it running. Only one scan can run at a
-// time, so the form has nothing to offer meanwhile.
+// picked is the scan on screen, one started here, a running one found in the list or one opened
+// from the list. The second covers a reload and a scan started from another tab. It is kept in
+// picked so the scan stays on screen after it ends, by then the list no longer calls it running.
+// Only one scan can run at a time, so the form has nothing to offer meanwhile.
 //
 // The form stays mounted under the progress view so New scan brings back what was typed.
 
@@ -86,7 +86,14 @@ export function ScansPage() {
           )}
         </div>
       </div>
-      <ScanHistory scans={scans.data ?? []} error={scans.error?.message} />
+      <ScanHistory
+        scans={scans.data ?? []}
+        error={scans.error?.message}
+        onOpen={running ? undefined : (id) => {
+          setPicked(id);
+          window.scrollTo({ top: 0 });
+        }}
+      />
     </>
   );
 }

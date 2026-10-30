@@ -154,7 +154,7 @@ export function ScanProgress({ scan, unreachable, onNew }: Props) {
         <div className={styles.legend}>
           <span><i />{scan.done} fetched</span>
           {scan.failed > 0 && <span data-kind="failed"><i />{scan.failed} failed</span>}
-          {left > 0 && <span data-kind="left"><i />{left} to go</span>}
+          {running && left > 0 && <span data-kind="left"><i />{left} to go</span>}
         </div>
       )}
       <div className={styles.progress} data-seeking={known ? undefined : ""}>

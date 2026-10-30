@@ -1,7 +1,7 @@
 /**
  * file: src/components/ScanHistory.tsx
  * importable: ScanHistory
- * description: The list of earlier scans, each one leading to its results.
+ * description: The list of earlier scans, each one leading to its results or to how it ended.
  */
 
 import { Link } from "react-router";
@@ -38,8 +38,15 @@ function Cells({ scan }: { scan: Scan }) {
   );
 }
 
-// A scan with nothing fetched has no results to open, so its row is not a link.
-export function ScanHistory({ scans, error }: { scans: Scan[]; error?: string }) {
+type Props = {
+  scans: Scan[];
+  error?: string;
+  onOpen?: (id: number) => void;
+};
+
+// A scan with nothing fetched has no results to open, its row shows how it ended instead. Without
+// onOpen such a row stays plain, the page leaves it out while a scan is running on screen.
+export function ScanHistory({ scans, error, onOpen }: Props) {
   return (
     <section className={styles.basin}>
       <h2>Earlier scans</h2>
@@ -56,13 +63,15 @@ export function ScanHistory({ scans, error }: { scans: Scan[]; error?: string })
             <span className={styles.num}>Took</span>
             <span className={styles.status}>Status</span>
           </div>
-          {scans.map((scan) =>
-            scan.done > 0 ? (
-              <Link key={scan.id} className={styles.row} to={`/scans/${scan.id}/results`}><Cells scan={scan} /></Link>
-            ) : (
-              <div key={scan.id} className={styles.row}><Cells scan={scan} /></div>
-            ),
-          )}
+          {scans.map((scan) => {
+            if (scan.done > 0) {
+              return <Link key={scan.id} className={styles.row} to={`/scans/${scan.id}/results`}><Cells scan={scan} /></Link>;
+            }
+            if (onOpen) {
+              return <button key={scan.id} type="button" className={styles.row} onClick={() => onOpen(scan.id)}><Cells scan={scan} /></button>;
+            }
+            return <div key={scan.id} className={styles.row}><Cells scan={scan} /></div>;
+          })}
         </>
       )}
     </section>
