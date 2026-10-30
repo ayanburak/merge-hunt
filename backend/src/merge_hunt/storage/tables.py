@@ -1,6 +1,7 @@
 """
 file: tables.py
-importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow, ScanRow, ScanRepoRow, ProfileRow, IssueRow, IssueCommentRow, IssueFetchRow
+importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow, ScanRow, ScanRepoRow, ProfileRow, IssueRow, IssueCommentRow, IssueFetchRow,
+    IssueFeedbackRow
 
 The SQLAlchemy classes behind the database tables. One object of a Row class
 is one row of its table. They mirror the classes in domain/models.py but stay
@@ -209,3 +210,18 @@ class IssueFetchRow(Base):
 
     repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id", ondelete="CASCADE"), primary_key=True)
     fetched_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    labels: Mapped[list[str]] = mapped_column(JSON)
+
+# Does not point at issues on purpose, that row is deleted when the issue closes
+# or on the next fetch. issue holds the whole issue as JSON at the moment of the
+# feedback, the ranking that learns from these needs its text long after that.
+class IssueFeedbackRow(Base):
+    __tablename__ = "issue_feedback"
+    __table_args__ = (UniqueConstraint("repo_id", "number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id", ondelete="CASCADE"))
+    number: Mapped[int]
+    value: Mapped[str]
+    at: Mapped[datetime] = mapped_column(UtcDateTime)
+    issue: Mapped[dict] = mapped_column(JSON)

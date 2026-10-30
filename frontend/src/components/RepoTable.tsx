@@ -10,13 +10,14 @@
 // Sorting is the only thing decided here. Who passes and every score come from the backend.
 
 import { useState } from "react";
+import { Link } from "react-router";
 
 import type { ProfileSettings, ScoredRepo } from "../api/client";
 import { ago, number } from "../format";
 import { COLUMNS, FILTER_LABELS } from "./columns";
 import styles from "./RepoTable.module.css";
 
-export type SortKey = "score" | "name" | "merge_rate" | "ignored_rate" | "response_days" | "commits";
+export type SortKey = "score" | "name" | "merge_rate" | "ignored_rate" | "response_days" | "commits" | "issues";
 
 const ROW = 62;
 const OPEN = 160;
@@ -32,7 +33,14 @@ const SORTERS: Record<SortKey, (a: ScoredRepo, b: ScoredRepo) => number> = {
   ignored_rate: (a, b) => (a.metrics.ignored_rate ?? 9) - (b.metrics.ignored_rate ?? 9),
   response_days: (a, b) => (a.metrics.median_response_days ?? 9e9) - (b.metrics.median_response_days ?? 9e9),
   commits: (a, b) => b.commit_count - a.commit_count,
+  issues: (a, b) => (b.free_issues ?? -1) - (a.free_issues ?? -1),
 };
+
+// A repo nobody looked at has no count, that is not the same as having none.
+function issueLink(free: number | null | undefined): string {
+  if (free == null) return "See issues";
+  return free === 1 ? "See 1 issue" : `See ${free} issues`;
+}
 
 function reason(item: ScoredRepo, key: string, settings: ProfileSettings): string {
   const column = COLUMNS.find((entry) => entry.key === key);
@@ -66,6 +74,7 @@ function Detail({ item, settings }: { item: ScoredRepo; settings: ProfileSetting
         <div className={styles.topics}>
           {repo.topics.length > 0 ? repo.topics.slice(0, 8).map((topic) => <span key={topic}>{topic}</span>) : <span>None</span>}
         </div>
+        <Link className={styles.github} to={`/repos/${repo.id}`}>{issueLink(item.free_issues)}</Link>
         <a className={styles.github} href={`https://github.com/${fullName(item)}`} target="_blank" rel="noreferrer">Open on GitHub</a>
       </div>
       <div>
@@ -124,6 +133,9 @@ function Row({ item, settings, under, open, y, delay, onToggle }: RowProps) {
             </span>
           );
         })}
+        <span className={styles.cell} data-none={item.free_issues == null ? "" : undefined}>
+          <b>{item.free_issues ?? "–"}</b>
+        </span>
       </button>
       <div className={styles.more}>
         <div className={styles.moreInner}>{open && <Detail item={item} settings={settings} />}</div>
@@ -193,7 +205,7 @@ export function RepoTable({ repos, settings, sort, sieved, staggered }: Props) {
   );
 }
 
-const SORT_LABELS: [SortKey, string][] = [["name", "Repo"], ["score", "Score"], ...COLUMNS.map((column): [SortKey, string] => [column.key, column.label])];
+const SORT_LABELS: [SortKey, string][] = [["name", "Repo"], ["score", "Score"], ...COLUMNS.map((column): [SortKey, string] => [column.key, column.label]), ["issues", "Issues"]];
 
 export function RepoSort({ sort, onChange }: { sort: SortKey; onChange: (sort: SortKey) => void }) {
   return (

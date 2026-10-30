@@ -132,3 +132,32 @@ input.other {
     gap: 26px;
   }
 }
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.labels li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--ink-3);
+  font-size: 14px;
+}
+
+.labels button {
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+}
+
+.labels button:hover {
+  background: var(--ink);
+  color: var(--paper);
+}

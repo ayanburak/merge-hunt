@@ -1,0 +1,146 @@
+.card {
+  padding: 16px var(--gutter);
+  border-top: 1px solid var(--ink-4);
+}
+
+.card[data-skipped] {
+  opacity: .55;
+}
+
+.card[data-interested] {
+  box-shadow: inset 5px 0 0 var(--gold);
+}
+
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.head {
+  min-width: 0;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -.003em;
+  text-decoration: none;
+}
+
+.title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.flag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+}
+
+.flag[data-warn]::before {
+  background: var(--gold);
+}
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.labels span {
+  padding: 1px 7px;
+  border: 1px solid var(--ink-3);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.feedback,
+.toggle {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--ink-3);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.feedback:hover,
+.toggle:hover {
+  border-color: var(--ink);
+}
+
+.feedback[aria-pressed="true"] {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.feedback:disabled {
+  cursor: default;
+  opacity: .6;
+}
+
+.more {
+  max-width: 78ch;
+  margin-top: 14px;
+}
+
+.more h4 {
+  margin-top: 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.body {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.comment {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--ink-4);
+}
+
+.who {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.who b {
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .top {
+    flex-direction: column;
+    gap: 12px;
+  }
+}

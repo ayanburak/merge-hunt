@@ -8,9 +8,9 @@ one by one, fetches their open issues carrying one of the labels and saves
 them. Unlike enrichment there is no freshness check, a fetch takes about a
 second and issues get taken quickly.
 
-refresh(repo, labels) does the same for one repo outside a scan. load(repo_id,
-options) reads what is saved, filters it and runs the analyzer. It never goes
-to GitHub.
+refresh(repo) does the same for one repo outside a scan, with the labels of its
+last fetch. load(repo_id, options) reads what is saved, filters it and runs the
+analyzer. It never goes to GitHub.
 
 A failed repo does not stop the others in find. Only a rejected token stops the
 whole run, GitHubAuthError goes up to the caller.
@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from merge_hunt.domain.issues import AnalyzedIssue, IssueFilter, RepoIssues, is_shown
+from merge_hunt.domain.issues import AnalyzedIssue, FeedbackValue, IssueFilter, RepoIssues, is_shown
 from merge_hunt.domain.models import RepoRef
 from merge_hunt.github.client import GitHubAuthError, GitHubClient, GitHubQueryError, WaitListener
 from merge_hunt.pipeline.issue_analysis import IssueAnalyzer
@@ -69,7 +69,7 @@ class IssueFinder:
 
     async def _fetch(self, repo: RepoRef, labels: Sequence[str], on_wait: WaitListener | None) -> None:
         issues = await self._client.issues(repo.owner, repo.name, labels, on_wait)
-        await self._store.save(repo.id, issues, self._clock())
+        await self._store.save(repo.id, issues, labels, self._clock())
 
     async def find(
         self,
@@ -101,16 +101,19 @@ class IssueFinder:
             if on_progress is not None:
                 await on_progress(result)
 
-    async def refresh(self, repo: RepoRef, labels: Sequence[str]) -> None:
+    # A fetch replaces the saved list, so the same labels have to be used or
+    # issues of a scan with its own labels would disappear.
+    async def refresh(self, repo: RepoRef) -> None:
         """Fetches one repo's issues again, replacing the saved ones.
 
         Args:
             repo: The repo.
-            labels: Issues carrying one of these are fetched.
 
         Raises:
             IssueFetchError: GitHub could not answer or rejected the token.
         """
+        last = await self._store.load(repo.id)
+        labels = last.labels if last else DEFAULT_ISSUE_LABELS
         try:
             await self._fetch(repo, labels, None)
         except (GitHubAuthError, GitHubQueryError, httpx.HTTPError) as error:
@@ -131,7 +134,26 @@ class IssueFinder:
         """
         fetch = await self._store.load(repo_id)
         if fetch is None:
-            return RepoIssues(None, ())
+            return RepoIssues(None, (), ())
         now = self._clock()
-        shown = [issue for issue in fetch.issues if is_shown(issue, options, now)]
-        return RepoIssues(fetch.fetched_at, tuple([AnalyzedIssue(issue, await self._analyzer.analyze(issue)) for issue in shown]))
+        feedback = await self._store.feedback(repo_id)
+        shown = [issue for issue in fetch.issues if is_shown(issue, options, now, feedback.get(issue.number))]
+        analyzed = [AnalyzedIssue(issue, await self._analyzer.analyze(issue), feedback.get(issue.number)) for issue in shown]
+        return RepoIssues(fetch.fetched_at, fetch.labels, tuple(analyzed))
+
+    async def give_feedback(self, repo_id: int, number: int, value: FeedbackValue) -> bool:
+        """Records the user's feedback on an issue.
+
+        Args:
+            repo_id: GitHub's numeric id of the repo.
+            number: The issue's number.
+            value: The feedback.
+
+        Returns:
+            False when the repo has no saved issue with this number.
+        """
+        return await self._store.save_feedback(repo_id, number, value, self._clock())
+
+    async def take_back_feedback(self, repo_id: int, number: int) -> None:
+        """Removes the user's feedback on an issue."""
+        await self._store.delete_feedback(repo_id, number)

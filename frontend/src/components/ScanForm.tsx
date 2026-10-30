@@ -15,6 +15,7 @@ import { duration } from "../format";
 import { DualSlider } from "./DualSlider";
 import { NumberBox } from "./NumberBox";
 import controls from "./Controls.module.css";
+import { Segments } from "./Segments";
 import styles from "./ScanForm.module.css";
 
 type Options = Required<ScanRequest>;
@@ -45,16 +46,34 @@ const PUSHED: [number, string][] = [[30, "30 d"], [90, "90 d"], [180, "180 d"], 
 const CANDIDATES: [number, string][] = [[25, "25"], [50, "50"], [100, "100"], [250, "250"], [500, "500"], [1000, "1,000"]];
 const SORTS: [Options["sort"], string][] = [["stars-desc", "Most stars"], ["stars-asc", "Fewest stars"], ["updated-desc", "Recently updated"]];
 
-// Buttons that pick one value out of a few.
-function Segments<T>({ items, value, onChange }: { items: [T, string][]; value: T; onChange: (value: T) => void }) {
+// A label is added with Enter, GitHub matches the name exactly so it stays as typed.
+function IssueLabels({ labels, onChange }: { labels: string[]; onChange: (labels: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const label = draft.trim();
+    if (label && !labels.includes(label)) onChange([...labels, label]);
+    setDraft("");
+  };
+
   return (
-    <div className={controls.segments}>
-      {items.map(([item, label]) => (
-        <button key={label} type="button" className={controls.choice} aria-pressed={item === value} onClick={() => onChange(item)}>
-          {label}
-        </button>
-      ))}
-    </div>
+    <>
+      <input className={controls.box} id="issue-labels" placeholder="Add a label, then press Enter" autoComplete="off" value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          add();
+        }} />
+      <ul className={styles.labels}>
+        {labels.map((label) => (
+          <li key={label}>
+            {label}
+            <button type="button" aria-label={`Remove ${label}`} onClick={() => onChange(labels.filter((item) => item !== label))}>×</button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -65,6 +84,7 @@ export function problems(options: Options): string[] {
   if (options.min_stars > options.max_stars) found.push("The lowest star count is above the highest.");
   if (options.min_prs > options.max_prs) found.push("The lowest pull request count is above the highest.");
   if (options.window_days < 1 || options.commit_days < 1) found.push("A period has to be at least 1 day.");
+  if (options.issue_labels.length === 0) found.push("Add at least one issue label.");
   return found;
 }
 
@@ -156,6 +176,10 @@ export function ScanForm({ defaults, lastDone, error, busy, onStart }: Props) {
               <label className={styles.label} htmlFor="help-wanted">Help wanted, at least</label>
               <NumberBox id="help-wanted" value={options.min_help_wanted_issues} onChange={(min_help_wanted_issues) => set({ min_help_wanted_issues })} />
             </div>
+          </div>
+          <div className={styles.control}>
+            <label className={styles.label} htmlFor="issue-labels"><span>Issue labels to fetch</span><span className={styles.hint}>Exact names</span></label>
+            <IssueLabels labels={options.issue_labels} onChange={(issue_labels) => set({ issue_labels })} />
           </div>
         </div>
 

@@ -25,7 +25,7 @@ ProfileStore keeps the user's named profiles. It takes their settings as a
 JSON dict, turning that into a FilterProfile is the API's job.
 
 IssueStore keeps the open issues last fetched for a repo, each fetch replaces
-the one before it.
+the one before it, and the user's feedback on them, which outlives that.
 
 description: Saves and loads repos, their pull request, commit and issue data, scans and profiles.
 """
@@ -35,15 +35,17 @@ description: Saves and loads repos, their pull request, commit and issue data, s
 # all in a single transaction. That way complete_since always describes one
 # fetch, and a write that fails half way leaves the old data as it was.
 
+import json
 from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
+from merge_hunt.domain.issues import FeedbackValue
 from merge_hunt.domain.models import (
     Actor,
     CloseSource,
@@ -65,6 +67,7 @@ from merge_hunt.storage.tables import (
     CommitRow,
     InteractionRow,
     IssueCommentRow,
+    IssueFeedbackRow,
     IssueFetchRow,
     IssueRow,
     ProfileRow,
@@ -522,7 +525,7 @@ class IssueStore:
 
     # Deleting the issues takes their comments with them through the cascade,
     # same as pull requests and their interactions.
-    async def save(self, repo_id: int, issues: Iterable[Issue], at: datetime) -> None:
+    async def save(self, repo_id: int, issues: Iterable[Issue], labels: Iterable[str], at: datetime) -> None:
         """Replaces a repo's issues with a new fetch.
 
         Either all of it is written or, when something fails, nothing changes.
@@ -530,6 +533,7 @@ class IssueStore:
         Args:
             repo_id: GitHub's numeric id of a saved repo.
             issues: The fetched issues.
+            labels: The labels they were fetched with.
             at: When they were fetched, timezone aware.
 
         Raises:
@@ -540,7 +544,7 @@ class IssueStore:
                 raise RepoNotFoundError(f"Repo {repo_id} is not saved, it has to be saved before its issues")
             await session.execute(delete(IssueRow).where(IssueRow.repo_id == repo_id))
             session.add_all(_issue_row(repo_id, issue) for issue in issues)
-            await session.merge(IssueFetchRow(repo_id=repo_id, fetched_at=at))
+            await session.merge(IssueFetchRow(repo_id=repo_id, fetched_at=at, labels=list(labels)))
 
     async def load(self, repo_id: int) -> IssueFetch | None:
         """Loads a repo's last saved issues.
@@ -559,7 +563,72 @@ class IssueStore:
             rows = await session.scalars(
                 select(IssueRow).where(IssueRow.repo_id == repo_id).order_by(IssueRow.id).options(selectinload(IssueRow.comments))
             )
-            return IssueFetch(fetch.fetched_at, tuple(_issue(row) for row in rows))
+            return IssueFetch(fetch.fetched_at, tuple(fetch.labels), tuple(_issue(row) for row in rows))
+
+    # One query for all repos, the results page asks this for a whole scan on
+    # every filter change. The conditions are the ones of the default IssueFilter.
+    async def free_counts(self, repo_ids: Iterable[int]) -> dict[int, int]:
+        """Counts the issues a repo shows by default, not assigned, not linked and not skipped.
+
+        Args:
+            repo_ids: GitHub's numeric ids of the repos.
+
+        Returns:
+            The count per repo. A repo whose issues were never fetched is left out.
+        """
+        repo_ids = list(repo_ids)
+        skipped = select(IssueFeedbackRow.id).where(
+            IssueFeedbackRow.repo_id == IssueRow.repo_id,
+            IssueFeedbackRow.number == IssueRow.number,
+            IssueFeedbackRow.value == FeedbackValue.SKIPPED,
+        )
+        async with self._sessions() as session:
+            fetched = await session.scalars(select(IssueFetchRow.repo_id).where(IssueFetchRow.repo_id.in_(repo_ids)))
+            counts = await session.execute(
+                select(IssueRow.repo_id, func.count())
+                .where(IssueRow.repo_id.in_(repo_ids), IssueRow.assigned.is_(False), IssueRow.linked_prs == 0, ~skipped.exists())
+                .group_by(IssueRow.repo_id)
+            )
+            return dict.fromkeys(fetched, 0) | dict(counts.all())
+
+    # The copy of the issue is taken here, while its row is still there. Pressing
+    # the other button overwrites the value and takes a new copy.
+    async def save_feedback(self, repo_id: int, number: int, value: FeedbackValue, at: datetime) -> bool:
+        """Records what the user said about an issue.
+
+        Args:
+            repo_id: GitHub's numeric id of the repo.
+            number: The issue's number.
+            value: The feedback, it replaces an earlier one.
+            at: When it was given, timezone aware.
+
+        Returns:
+            False when the repo has no saved issue with this number.
+        """
+        async with self._sessions.begin() as session:
+            row = await session.scalar(
+                select(IssueRow).where(IssueRow.repo_id == repo_id, IssueRow.number == number).options(selectinload(IssueRow.comments))
+            )
+            if row is None:
+                return False
+            copy = json.loads(json.dumps(asdict(_issue(row)), default=datetime.isoformat))
+            feedback = await session.scalar(select(IssueFeedbackRow).where(IssueFeedbackRow.repo_id == repo_id, IssueFeedbackRow.number == number))
+            if feedback is None:
+                session.add(IssueFeedbackRow(repo_id=repo_id, number=number, value=value, at=at, issue=copy))
+            else:
+                feedback.value, feedback.at, feedback.issue = value, at, copy
+            return True
+
+    async def delete_feedback(self, repo_id: int, number: int) -> None:
+        """Takes back the feedback on an issue, nothing happens when there is none."""
+        async with self._sessions.begin() as session:
+            await session.execute(delete(IssueFeedbackRow).where(IssueFeedbackRow.repo_id == repo_id, IssueFeedbackRow.number == number))
+
+    async def feedback(self, repo_id: int) -> dict[int, FeedbackValue]:
+        """Gives the user's feedback on a repo's issues by issue number."""
+        async with self._sessions() as session:
+            rows = await session.execute(select(IssueFeedbackRow.number, IssueFeedbackRow.value).where(IssueFeedbackRow.repo_id == repo_id))
+            return {number: FeedbackValue(value) for number, value in rows}
 
 # The profile names are unique, the database checks that, so two requests can
 # not slip past each other the way they could with a look before the write.

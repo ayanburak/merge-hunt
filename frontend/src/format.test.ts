@@ -56,6 +56,7 @@ describe("ago", () => {
     expect(ago("2026-10-27T12:00:00Z")).toBe("3d ago");
     expect(ago("2026-09-01T12:00:00Z")).toBe("59d ago");
     expect(ago("2026-04-30T12:00:00Z")).toBe("6mo ago");
+    expect(ago("2022-10-30T12:00:00Z")).toBe("4y ago");
   });
 
   it("treats a date ahead of the clock as today", () => {

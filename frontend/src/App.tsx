@@ -6,6 +6,7 @@
 
 import { Navigate, Route, Routes } from "react-router";
 
+import { RepoDetailPage } from "./pages/RepoDetailPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import { ScansPage } from "./pages/ScansPage";
 
@@ -16,6 +17,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<ScansPage />} />
       <Route path="/scans/:id/results" element={<ResultsPage />} />
+      <Route path="/repos/:id" element={<RepoDetailPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

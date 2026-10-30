@@ -1,7 +1,8 @@
 /**
  * file: src/api/client.ts
  * importable: ApiError, scanDefaults, startScan, listScans, getScan, scanResults, defaultProfile,
- *             listProfiles, createProfile, updateProfile, deleteProfile, and the types they use
+ *             listProfiles, createProfile, updateProfile, deleteProfile, getRepo, repoIssues,
+ *             refreshIssues, giveFeedback, takeBackFeedback, and the types they use
  *
  * Every call to the backend goes through here, pages and hooks never call fetch themselves.
  * A call that fails throws ApiError, its message is ready to show on the screen.
@@ -27,6 +28,18 @@ export type ScoredRepo = Schemas["ScoredRepo"];
 export type ProfileSettings = Schemas["ProfileSettings"];
 export type ProfileWrite = Schemas["ProfileWrite"];
 export type ProfileAnswer = Schemas["ProfileAnswer"];
+export type Repo = Schemas["Repo"];
+export type RepoIssues = Schemas["RepoIssues"];
+export type AnalyzedIssue = Schemas["AnalyzedIssue"];
+export type FeedbackValue = Schemas["FeedbackValue"];
+
+// What the issue list can hide, the backend does the hiding.
+export type IssueFilter = {
+  hide_assigned: boolean;
+  hide_linked: boolean;
+  max_age_days: number | null;
+  show_skipped: boolean;
+};
 
 // --- Requests ---
 
@@ -113,4 +126,33 @@ export function updateProfile(id: number, profile: ProfileWrite): Promise<Profil
 
 export function deleteProfile(id: number): Promise<void> {
   return request(`/profiles/${id}`, "DELETE");
+}
+
+// --- Repos ---
+
+export function getRepo(id: number): Promise<Repo> {
+  return request(`/repos/${id}`);
+}
+
+// An empty age limit is left out of the address, the backend reads that as no limit.
+export function repoIssues(id: number, filter: IssueFilter): Promise<RepoIssues> {
+  const query = new URLSearchParams({
+    hide_assigned: String(filter.hide_assigned),
+    hide_linked: String(filter.hide_linked),
+    show_skipped: String(filter.show_skipped),
+  });
+  if (filter.max_age_days !== null) query.set("max_age_days", String(filter.max_age_days));
+  return request(`/repos/${id}/issues?${query}`);
+}
+
+export function refreshIssues(id: number): Promise<void> {
+  return request(`/repos/${id}/issues/refresh`, "POST");
+}
+
+export function giveFeedback(id: number, number: number, value: FeedbackValue): Promise<void> {
+  return request(`/repos/${id}/issues/${number}/feedback`, "PUT", { value });
+}
+
+export function takeBackFeedback(id: number, number: number): Promise<void> {
+  return request(`/repos/${id}/issues/${number}/feedback`, "DELETE");
 }

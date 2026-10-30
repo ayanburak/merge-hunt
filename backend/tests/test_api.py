@@ -374,7 +374,7 @@ def test_repo_issues_are_filtered_and_analyzed(tmp_path):
         state = client._transport.app.state
         await state.repos.save_repos([api_repo()], NOW)
         claim = IssueComment(Actor("bob", False), "NONE", NOW, "I'd like to work on this")
-        await state.issue_finder._store.save(5, [api_issue(1, comments=(claim,), comment_count=1), api_issue(2, assigned=True)], NOW)
+        await state.issue_finder._store.save(5, [api_issue(1, comments=(claim,), comment_count=1), api_issue(2, assigned=True)], ("easy",), NOW)
         default = (await client.get("/repos/5/issues")).json()
         everything = (await client.get("/repos/5/issues", params={"hide_assigned": False})).json()
         return default, everything
@@ -389,7 +389,7 @@ def test_repo_never_fetched_has_empty_issues(tmp_path):
         await client._transport.app.state.repos.save_repos([api_repo()], NOW)
         return (await client.get("/repos/5/issues")).json()
 
-    assert run(tmp_path, body) == {"fetched_at": None, "issues": []}
+    assert run(tmp_path, body) == {"fetched_at": None, "labels": [], "issues": []}
 
 def test_issues_of_unknown_repo_is_404(tmp_path):
     async def body(client, _):
@@ -403,11 +403,11 @@ def test_refresh_saves_new_issues(tmp_path):
         await state.repos.save_repos([api_repo()], NOW)
         fake = FakeIssueClient()
         state.issue_finder._client = fake
-        response = await client.post("/repos/5/issues/refresh", params={"labels": ["easy"]})
+        response = await client.post("/repos/5/issues/refresh")
         return response.status_code, fake.calls, (await client.get("/repos/5/issues")).json()
 
     code, calls, answer = run(tmp_path, body)
-    assert code == 204 and calls == [("pallets", "click", ["easy"])] and len(answer["issues"]) == 1
+    assert code == 204 and calls == [("pallets", "click", ["good first issue", "help wanted"])] and len(answer["issues"]) == 1
 
 def test_refresh_failure_is_bad_gateway(tmp_path):
     async def body(client, _):
@@ -424,3 +424,35 @@ def test_start_scan_refuses_empty_label_list(tmp_path):
         return (await client.post("/scans", json={"issue_labels": []})).status_code, (await client.post("/scans", json={"issue_labels": [" "]})).status_code
 
     assert run(tmp_path, body) == (422, 422)
+
+def test_get_repo(tmp_path):
+    async def body(client, _):
+        await client._transport.app.state.repos.save_repos([api_repo()], NOW)
+        return (await client.get("/repos/5")).json(), (await client.get("/repos/6")).status_code
+
+    repo, missing = run(tmp_path, body)
+    assert repo["name"] == "click" and missing == 404
+
+def test_feedback_round_trip(tmp_path):
+    async def body(client, _):
+        state = client._transport.app.state
+        await state.repos.save_repos([api_repo()], NOW)
+        await state.issue_finder._store.save(5, [api_issue(1)], (), NOW)
+        put = await client.put("/repos/5/issues/1/feedback", json={"value": "SKIPPED"})
+        hidden = (await client.get("/repos/5/issues")).json()["issues"]
+        shown = (await client.get("/repos/5/issues", params={"show_skipped": True})).json()["issues"]
+        delete = await client.delete("/repos/5/issues/1/feedback")
+        back = (await client.get("/repos/5/issues")).json()["issues"]
+        return put.status_code, hidden, shown[0]["feedback"], delete.status_code, back[0]["feedback"]
+
+    assert run(tmp_path, body) == (204, [], "SKIPPED", 204, None)
+
+def test_feedback_is_checked(tmp_path):
+    async def body(client, _):
+        await client._transport.app.state.repos.save_repos([api_repo()], NOW)
+        wrong = await client.put("/repos/5/issues/1/feedback", json={"value": "MAYBE"})
+        no_issue = await client.put("/repos/5/issues/1/feedback", json={"value": "SKIPPED"})
+        no_repo = await client.delete("/repos/6/issues/1/feedback")
+        return wrong.status_code, no_issue.status_code, no_repo.status_code
+
+    assert run(tmp_path, body) == (422, 404, 404)

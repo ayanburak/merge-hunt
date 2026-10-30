@@ -115,6 +115,11 @@
   opacity: .66;
 }
 
+.facts > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .row[data-under] .title {
   font-weight: 500;
 }
@@ -241,6 +246,7 @@
 .github {
   display: inline-block;
   margin-top: 7px;
+  margin-right: 18px;
   font-weight: 600;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;

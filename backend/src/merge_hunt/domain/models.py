@@ -174,8 +174,10 @@ class Issue:
     comment_count: int
     comments: tuple[IssueComment, ...] = ()
 
-# issues keeps the order GitHub sent, last updated first.
+# issues keeps the order GitHub sent, last updated first. labels is what the
+# fetch asked for, fetching again with other labels would lose issues.
 @dataclass(frozen=True, slots=True)
 class IssueFetch:
     fetched_at: datetime
+    labels: tuple[str, ...]
     issues: tuple[Issue, ...]

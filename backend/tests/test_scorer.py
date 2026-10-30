@@ -15,11 +15,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from merge_hunt.domain.metrics import MetricOptions
-from merge_hunt.domain.models import Actor, Commit, CommitHistory, PullRequest, PullRequestHistory, Repo
+from merge_hunt.domain.models import Actor, Commit, CommitHistory, Issue, PullRequest, PullRequestHistory, Repo
 from merge_hunt.domain.scoring import FilterProfile
 from merge_hunt.pipeline.scoring import Scorer
 from merge_hunt.storage.database import create_engine, create_tables
-from merge_hunt.storage.stores import RepoStore
+from merge_hunt.storage.stores import IssueStore, RepoStore
 
 # --- Helpers ---
 
@@ -65,7 +65,7 @@ def test_passed_first_then_by_score():
         await save(store, 1, merged=9)
         await save(store, 2, merged=4)
         await save(store, 3, merged=12)
-        return await Scorer(store, clock=lambda: NOW).score([2, 1, 3], FilterProfile())
+        return await Scorer(store, IssueStore(store._sessions), clock=lambda: NOW).score([2, 1, 3], FilterProfile())
 
     results = run(body)
     assert [item.repo.id for item in results] == [3, 1, 2]
@@ -76,7 +76,7 @@ def test_unknown_undiscovered_and_unenriched_repos_left_out():
         await save(store, 1, merged=12)
         await store.save_repo(2, "owner", "only-enriched-row")
         await store.save_repos([repo(3)], NOW)
-        return await Scorer(store, clock=lambda: NOW).score([1, 2, 3, 4], FilterProfile())
+        return await Scorer(store, IssueStore(store._sessions), clock=lambda: NOW).score([1, 2, 3, 4], FilterProfile())
 
     assert [item.repo.id for item in run(body)] == [1]
 
@@ -84,7 +84,7 @@ def test_clock_sets_the_window():
     async def body(store):
         await save(store, 1, merged=12)
         later = NOW + timedelta(days=365)
-        return await Scorer(store, clock=lambda: later).score([1], FilterProfile())
+        return await Scorer(store, IssueStore(store._sessions), clock=lambda: later).score([1], FilterProfile())
 
     result = run(body)[0]
     assert result.metrics.accepted == 0 and result.commit_count == 0
@@ -93,10 +93,23 @@ def test_clock_sets_the_window():
 def test_window_longer_than_the_saved_data_is_flagged():
     async def body(store):
         await save(store, 1, merged=9)
-        scorer = Scorer(store, clock=lambda: NOW)
+        scorer = Scorer(store, IssueStore(store._sessions), clock=lambda: NOW)
         wide = replace(FilterProfile(), metrics=MetricOptions(window_days=365))
         return (await scorer.score([1], FilterProfile()))[0], (await scorer.score([1], wide))[0]
 
     normal, wide = run(body)
     assert normal.window_covered is True
     assert wide.window_covered is False and wide.metrics.accepted == 9
+
+# Repo 2 was never looked at for issues, that has to stay apart from a zero.
+def test_issue_count_goes_along_and_leaves_the_score_alone():
+    async def body(store):
+        await save(store, 1, merged=9)
+        await save(store, 2, merged=9)
+        issue = Issue(1, "Fix it", "", AUTHOR, NOW, NOW, (), False, 0, 0)
+        await IssueStore(store._sessions).save(1, [issue], (), NOW)
+        return await Scorer(store, IssueStore(store._sessions), clock=lambda: NOW).score([1, 2], FilterProfile())
+
+    first, second = run(body)
+    assert (first.free_issues, second.free_issues) == (1, None)
+    assert first.score == second.score

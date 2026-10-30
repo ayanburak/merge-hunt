@@ -1,6 +1,6 @@
 """
 file: schemas.py
-importable: ScanRequest, ScanCreated, ProfileSettings, ProfileWrite, ProfileAnswer
+importable: ScanRequest, ScanCreated, ProfileSettings, ProfileWrite, ProfileAnswer, FeedbackWrite
 
 The shapes the API accepts and returns where a domain class does not fit
 as it is. Values coming from outside are checked here with Pydantic, so the
@@ -20,6 +20,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from merge_hunt.domain.issues import FeedbackValue
 from merge_hunt.domain.metrics import MetricOptions
 from merge_hunt.domain.scoring import FilterProfile, Range, SavedProfile, Weights
 from merge_hunt.pipeline.discovery import MAX_CANDIDATES, DiscoveryOptions, SearchSort
@@ -64,6 +65,11 @@ class ScanRequest(BaseModel):
 
 class ScanCreated(BaseModel):
     id: int
+
+# --- Issues ---
+
+class FeedbackWrite(BaseModel):
+    value: FeedbackValue
 
 # --- Profiles ---
 

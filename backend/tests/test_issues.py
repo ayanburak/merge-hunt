@@ -16,14 +16,14 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from merge_hunt.domain.issues import IssueFilter, is_shown
+from merge_hunt.domain.issues import FeedbackValue, IssueFilter, is_shown
 from merge_hunt.domain.models import Actor, Issue, IssueComment, RepoRef
 from merge_hunt.github.client import GitHubAuthError, GitHubQueryError
 from merge_hunt.pipeline.issue_analysis import CLAIM_MAX_LENGTH, RuleIssueAnalyzer
 from merge_hunt.pipeline.issue_finder import IssueFetchError, IssueFinder
 from merge_hunt.storage.database import create_engine, create_tables
 from merge_hunt.storage.stores import IssueStore, RepoNotFoundError, RepoStore
-from merge_hunt.storage.tables import IssueCommentRow, IssueRow
+from merge_hunt.storage.tables import IssueCommentRow, IssueFeedbackRow, IssueRow
 
 # --- Helpers ---
 
@@ -139,16 +139,16 @@ def test_store_gives_back_what_was_saved_in_order():
     saved = (make_issue(5, comments=(comment("one"), comment("two")), comment_count=7), make_issue(3))
 
     async def body(store, _):
-        await store.save(CLICK.id, saved, NOW)
+        await store.save(CLICK.id, saved, ("easy",), NOW)
         return await store.load(CLICK.id)
 
     fetch = run(body)
-    assert fetch.fetched_at == NOW and fetch.issues == saved
+    assert fetch.fetched_at == NOW and fetch.issues == saved and fetch.labels == ("easy",)
 
 def test_store_replaces_the_last_fetch_and_its_comments():
     async def body(store, sessions):
-        await store.save(CLICK.id, [make_issue(5, comments=(comment("one"),))], NOW)
-        await store.save(CLICK.id, [make_issue(6)], NOW + timedelta(hours=1))
+        await store.save(CLICK.id, [make_issue(5, comments=(comment("one"),))], (), NOW)
+        await store.save(CLICK.id, [make_issue(6)], (), NOW + timedelta(hours=1))
         async with sessions() as session:
             counts = await session.scalar(select(func.count()).select_from(IssueRow)), await session.scalar(select(func.count()).select_from(IssueCommentRow))
         return await store.load(CLICK.id), counts
@@ -159,7 +159,7 @@ def test_store_replaces_the_last_fetch_and_its_comments():
 
 def test_store_tells_empty_from_never_fetched():
     async def body(store, _):
-        await store.save(CLICK.id, [], NOW)
+        await store.save(CLICK.id, [], (), NOW)
         return await store.load(CLICK.id), await store.load(FLASK.id)
 
     empty, never = run(body)
@@ -168,7 +168,7 @@ def test_store_tells_empty_from_never_fetched():
 def test_store_refuses_unknown_repo():
     async def body(store, _):
         with pytest.raises(RepoNotFoundError):
-            await store.save(99, [], NOW)
+            await store.save(99, [], (), NOW)
 
     run(body)
 
@@ -219,7 +219,7 @@ def test_rejected_token_stops_find():
 def test_refresh_wraps_every_fetch_error(error):
     async def body(store, _):
         with pytest.raises(IssueFetchError):
-            await finder_for(store, {"click": error}).refresh(CLICK, ("easy",))
+            await finder_for(store, {"click": error}).refresh(CLICK)
 
     run(body)
 
@@ -227,11 +227,11 @@ def test_load_filters_analyzes_and_keeps_order():
     issues = (make_issue(1, comments=(comment("I'll take it"),)), make_issue(2, assigned=True), make_issue(3))
 
     async def body(store, _):
-        await store.save(CLICK.id, issues, NOW)
+        await store.save(CLICK.id, issues, ("easy",), NOW)
         return await finder_for(store, {}).load(CLICK.id, IssueFilter())
 
     answer = run(body)
-    assert answer.fetched_at == NOW
+    assert answer.fetched_at == NOW and answer.labels == ("easy",)
     assert [item.issue.number for item in answer.issues] == [1, 3]
     assert answer.issues[0].analysis.claimed_at == NOW and answer.issues[1].analysis.claimed_at is None
 
@@ -241,3 +241,86 @@ def test_load_of_never_fetched_repo_has_no_time():
 
     answer = run(body)
     assert answer.fetched_at is None and answer.issues == ()
+
+def test_refresh_keeps_the_labels_of_the_last_fetch():
+    async def body(store, _):
+        finder = finder_for(store, {"click": ()})
+        await finder.find([CLICK], ("easy", "docs"))
+        await finder.refresh(CLICK)
+        return finder._client.calls
+
+    calls = run(body)
+    assert calls[0] == calls[1] == ("click", ("easy", "docs"))
+
+def test_refresh_of_never_fetched_repo_uses_the_defaults():
+    async def body(store, _):
+        finder = finder_for(store, {"click": ()})
+        await finder.refresh(CLICK)
+        return finder._client.calls
+
+    assert run(body) == [("click", ("good first issue", "help wanted"))]
+
+# --- Feedback ---
+
+def test_skipped_issue_is_hidden_until_asked_for():
+    async def body(store, _):
+        await store.save(CLICK.id, [make_issue(1), make_issue(2)], (), NOW)
+        finder = finder_for(store, {})
+        assert await finder.give_feedback(CLICK.id, 1, FeedbackValue.SKIPPED)
+        assert await finder.give_feedback(CLICK.id, 2, FeedbackValue.INTERESTED)
+        return await finder.load(CLICK.id, IssueFilter()), await finder.load(CLICK.id, IssueFilter(show_skipped=True))
+
+    hidden, shown = run(body)
+    assert [(item.issue.number, item.feedback) for item in hidden.issues] == [(2, FeedbackValue.INTERESTED)]
+    assert [item.feedback for item in shown.issues] == [FeedbackValue.SKIPPED, FeedbackValue.INTERESTED]
+
+def test_feedback_on_unknown_issue_is_refused():
+    async def body(store, _):
+        return await finder_for(store, {}).give_feedback(CLICK.id, 7, FeedbackValue.SKIPPED)
+
+    assert run(body) is False
+
+# The whole point of the copy, the issue row is gone and the text must not be.
+def test_feedback_keeps_a_copy_after_the_issue_is_gone():
+    async def body(store, sessions):
+        await store.save(CLICK.id, [make_issue(1, title="Fix docs", comments=(comment("one"),))], (), NOW)
+        await store.save_feedback(CLICK.id, 1, FeedbackValue.INTERESTED, NOW)
+        await store.save(CLICK.id, [], (), NOW)
+        async with sessions() as session:
+            return await session.scalar(select(IssueFeedbackRow)), await store.feedback(CLICK.id)
+
+    row, feedback = run(body)
+    assert row.issue["title"] == "Fix docs" and row.issue["comments"][0]["body"] == "one"
+    assert row.issue["created_at"].startswith("2026-09") and feedback == {1: FeedbackValue.INTERESTED}
+
+def test_second_feedback_replaces_the_first_and_can_be_taken_back():
+    async def body(store, sessions):
+        await store.save(CLICK.id, [make_issue(1)], (), NOW)
+        await store.save_feedback(CLICK.id, 1, FeedbackValue.INTERESTED, NOW)
+        await store.save_feedback(CLICK.id, 1, FeedbackValue.SKIPPED, NOW)
+        replaced = await store.feedback(CLICK.id)
+        await store.delete_feedback(CLICK.id, 1)
+        await store.delete_feedback(CLICK.id, 1)
+        return replaced, await store.feedback(CLICK.id)
+
+    replaced, after = run(body)
+    assert replaced == {1: FeedbackValue.SKIPPED} and after == {}
+
+# --- Free Counts ---
+
+def test_free_counts_skip_taken_issues_and_never_fetched_repos():
+    issues = [make_issue(1), make_issue(2, assigned=True), make_issue(3, linked_prs=1), make_issue(4)]
+
+    async def body(store, _):
+        await store.save(CLICK.id, issues, (), NOW)
+        await store.save_feedback(CLICK.id, 4, FeedbackValue.SKIPPED, NOW)
+        return await store.free_counts([CLICK.id, FLASK.id])
+
+    assert run(body) == {CLICK.id: 1}
+
+def test_free_counts_tell_zero_from_never_fetched():
+    async def body(store, _):
+        await store.save(CLICK.id, [make_issue(1, assigned=True)], (), NOW)
+        return await store.free_counts([CLICK.id, FLASK.id])
+
+    assert run(body) == {CLICK.id: 0}

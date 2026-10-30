@@ -114,6 +114,7 @@ class ScoredRepo:
     failed_filters: tuple[str, ...]
     insufficient: bool
     window_covered: bool = True
+    free_issues: int | None = None
 
     @property
     def passed(self) -> bool:

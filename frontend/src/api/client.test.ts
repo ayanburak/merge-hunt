@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, createProfile, deleteProfile, getScan, listScans } from "./client";
+import { ApiError, createProfile, deleteProfile, getScan, giveFeedback, listScans, repoIssues } from "./client";
 import type { ProfileSettings } from "./client";
 
 // A fresh Response for each call, the body of one can only be read once.
@@ -86,5 +86,40 @@ describe("failures", () => {
 
     expect(error.status).toBe(0);
     expect(error.message).toBe("The backend is not reachable");
+  });
+});
+
+describe("repo issues", () => {
+  const FILTER = { hide_assigned: true, hide_linked: false, max_age_days: null, show_skipped: false };
+
+  it("leaves an empty age limit out of the address", async () => {
+    const fetch = answer(200, { issues: [] });
+    vi.stubGlobal("fetch", fetch);
+
+    await repoIssues(5, FILTER);
+
+    expect(fetch.mock.calls[0]).toEqual(expect.arrayContaining([expect.stringContaining("/repos/5/issues?hide_assigned=true&hide_linked=false&show_skipped=false")]));
+    expect(String((fetch.mock.calls[0] as unknown[])[0])).not.toContain("max_age_days");
+  });
+
+  it("sends the age limit when there is one", async () => {
+    const fetch = answer(200, { issues: [] });
+    vi.stubGlobal("fetch", fetch);
+
+    await repoIssues(5, { ...FILTER, max_age_days: 365 });
+
+    expect(String((fetch.mock.calls[0] as unknown[])[0])).toContain("max_age_days=365");
+  });
+
+  it("sends feedback as a PUT", async () => {
+    const fetch = answer(204);
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(giveFeedback(5, 12, "SKIPPED")).resolves.toBeUndefined();
+
+    const [url, options] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/repos/5/issues/12/feedback");
+    expect(options.method).toBe("PUT");
+    expect(options.body).toBe(JSON.stringify({ value: "SKIPPED" }));
   });
 });

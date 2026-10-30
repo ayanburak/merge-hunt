@@ -73,13 +73,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("%d scan left unfinished by the last run marked INTERRUPTED", interrupted)
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
                 client = GitHubClient(StaticTokenProvider(config.github_token), http)
-                finder = IssueFinder(client, IssueStore(sessions), RuleIssueAnalyzer())
+                issues = IssueStore(sessions)
+                finder = IssueFinder(client, issues, RuleIssueAnalyzer())
                 job = ScanJob(Discoverer(client, repos), Enricher(client, repos), finder, scans)
                 app.state.repos = repos
                 app.state.scans = scans
                 app.state.issue_finder = finder
                 app.state.profiles = ProfileStore(sessions)
-                app.state.scorer = Scorer(repos)
+                app.state.scorer = Scorer(repos, issues)
                 app.state.scan_job = job
                 try:
                     yield

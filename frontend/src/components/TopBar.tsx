@@ -13,6 +13,7 @@ import styles from "./TopBar.module.css";
 // the first such scan there is nowhere to go and it stays plain text.
 export function TopBar() {
   const scans = useScans();
+  const onScans = useMatch("/") !== null;
   const onResults = useMatch("/scans/:id/results") !== null;
   const latest = scans.data?.find((scan) => scan.done > 0);
 
@@ -25,7 +26,7 @@ export function TopBar() {
         merge-hunt
       </Link>
       <nav className={styles.nav}>
-        <Link to="/" aria-current={onResults ? undefined : "page"}>Scans</Link>
+        <Link to="/" aria-current={onScans ? "page" : undefined}>Scans</Link>
         {latest ? (
           <Link to={`/scans/${latest.id}/results`} aria-current={onResults ? "page" : undefined}>Results</Link>
         ) : (

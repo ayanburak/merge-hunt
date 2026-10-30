@@ -52,6 +52,10 @@ describe("problems", () => {
     expect(problems({ ...OPTIONS, commit_days: 0 })).toEqual(["A period has to be at least 1 day."]);
   });
 
+  it("needs at least one issue label", () => {
+    expect(problems({ ...OPTIONS, issue_labels: [] })).toEqual(["Add at least one issue label."]);
+  });
+
   it("reports everything at once", () => {
     expect(problems({ ...OPTIONS, min_stars: 6000, max_prs: 10, commit_days: 0 })).toHaveLength(3);
   });

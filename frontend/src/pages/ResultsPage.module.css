@@ -122,7 +122,7 @@
 }
 
 .scroller {
-  --columns: minmax(250px, 1.75fr) 64px repeat(4, minmax(120px, 1fr));
+  --columns: minmax(250px, 1.75fr) 64px repeat(4, minmax(120px, 1fr)) 64px;
 }
 
 .head {

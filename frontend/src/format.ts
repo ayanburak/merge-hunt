@@ -23,11 +23,12 @@ export function clock(iso: string): string {
   return CLOCK.format(new Date(iso));
 }
 
-// Written as 12d ago, or in months once days stop being useful.
+// Written as 12d ago, in months once days stop being useful and in years after two of them.
 export function ago(iso: string): string {
   const days = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 86400000));
   if (days === 0) return "today";
   if (days < 60) return `${days}d ago`;
+  if (days >= 730) return `${Math.round(days / 365)}y ago`;
   return `${Math.round(days / 30)}mo ago`;
 }
 

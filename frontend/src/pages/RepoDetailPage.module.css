@@ -1,0 +1,103 @@
+.page {
+  min-height: 100vh;
+  padding-bottom: 60px;
+  background: var(--paper);
+}
+
+.summary {
+  padding: 20px var(--gutter) 24px;
+}
+
+.back {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.back:hover {
+  color: var(--ink);
+}
+
+.title {
+  margin-top: 8px;
+  font-size: clamp(36px, 4.4vw, 60px);
+  font-stretch: 66%;
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+
+.title span {
+  color: var(--ink-2);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin-top: 8px;
+  color: var(--ink-2);
+}
+
+.fetch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.fetch button {
+  color: var(--ink);
+}
+
+.fetch button:disabled {
+  cursor: default;
+  opacity: .6;
+}
+
+.notice {
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--gutter);
+  border-top: 2px solid var(--ink);
+}
+
+.count {
+  min-width: 2ch;
+  font-size: 28px;
+  font-stretch: 78%;
+  font-weight: 400;
+}
+
+.word {
+  margin-right: 12px;
+}
+
+.age {
+  width: min(280px, 100%);
+}
+
+.blank {
+  padding: 40px var(--gutter);
+  border-top: 1px solid var(--ink-4);
+}
+
+.blank h2 {
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.blank p {
+  margin-top: 6px;
+  color: var(--ink-2);
+}

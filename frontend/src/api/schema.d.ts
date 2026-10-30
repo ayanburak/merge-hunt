@@ -127,6 +127,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/repos/{repo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Repo */
+        get: operations["get_repo_repos__repo_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/repos/{repo_id}/issues": {
         parameters: {
             query?: never;
@@ -161,6 +178,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/repos/{repo_id}/issues/{number}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Give Feedback */
+        put: operations["give_feedback_repos__repo_id__issues__number__feedback_put"];
+        post?: never;
+        /** Take Back Feedback */
+        delete: operations["take_back_feedback_repos__repo_id__issues__number__feedback_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -176,6 +211,16 @@ export interface components {
         AnalyzedIssue: {
             issue: components["schemas"]["Issue"];
             analysis: components["schemas"]["IssueAnalysis"];
+            feedback?: components["schemas"]["FeedbackValue"] | null;
+        };
+        /**
+         * FeedbackValue
+         * @enum {string}
+         */
+        FeedbackValue: "INTERESTED" | "SKIPPED";
+        /** FeedbackWrite */
+        FeedbackWrite: {
+            value: components["schemas"]["FeedbackValue"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -431,6 +476,8 @@ export interface components {
         RepoIssues: {
             /** Fetched At */
             fetched_at: string | null;
+            /** Labels */
+            labels: string[];
             /** Issues */
             issues: components["schemas"]["AnalyzedIssue"][];
         };
@@ -623,6 +670,8 @@ export interface components {
              * @default true
              */
             window_covered: boolean;
+            /** Free Issues */
+            free_issues?: number | null;
         };
         /**
          * SearchSort
@@ -992,12 +1041,44 @@ export interface operations {
             };
         };
     };
+    get_repo_repos__repo_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Repo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     repo_issues_repos__repo_id__issues_get: {
         parameters: {
             query?: {
                 hide_assigned?: boolean;
                 hide_linked?: boolean;
                 max_age_days?: number | null;
+                show_skipped?: boolean;
             };
             header?: never;
             path: {
@@ -1029,12 +1110,74 @@ export interface operations {
     };
     refresh_issues_repos__repo_id__issues_refresh_post: {
         parameters: {
-            query?: {
-                labels?: string[];
-            };
+            query?: never;
             header?: never;
             path: {
                 repo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    give_feedback_repos__repo_id__issues__number__feedback_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: number;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    take_back_feedback_repos__repo_id__issues__number__feedback_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: number;
+                number: number;
             };
             cookie?: never;
         };
