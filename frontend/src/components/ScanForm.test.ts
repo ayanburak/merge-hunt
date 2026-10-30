@@ -23,6 +23,7 @@ const OPTIONS = {
   max_prs: 500,
   window_days: 180,
   commit_days: 90,
+  issue_labels: ["good first issue", "help wanted"],
 } satisfies Required<ScanRequest>;
 
 // 867 seconds is the real scan of 30 October.

@@ -1,6 +1,7 @@
 """
 file: models.py
-importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment, RepoRef, Repo
+importable: Actor, Interaction, PullRequest, CloseSource, Commit, PullRequestHistory, CommitHistory, Enrichment, RepoRef, Repo,
+    Issue, IssueComment, IssueFetch
 
 Raw pull request and commit data, kept the way GitHub reported it. Nothing in here is
 computed, the enrichment step fills these from GitHub responses and the
@@ -19,7 +20,11 @@ the time they were fetched. RepoRef points at one repo on GitHub, it is what
 the enrichment step is given to work on. Repo is what discovery found out
 about a repo from GitHub's search, its size, language and activity.
 
-description: Raw pull request and commit data that the metrics are calculated from.
+Issue is an open issue as GitHub reported it, with its last comments. Whether
+it is really free to take is decided later, IssueFetch is the list one fetch
+saved together with the time it was fetched.
+
+description: Raw pull request, commit and issue data that everything else is calculated from.
 """
 
 # NOTE: Associations are kept as plain strings and not as an enum. GitHub has
@@ -138,3 +143,39 @@ class Enrichment:
     enriched_at: datetime
     prs: PullRequestHistory
     commits: CommitHistory
+
+# --- Issues ---
+
+# One of the last comments on an issue. The text is kept next to who wrote it,
+# deciding what a comment means is the analyzer's work and can change later
+# without fetching anything again.
+@dataclass(frozen=True, slots=True)
+class IssueComment:
+    author: Actor
+    association: str
+    at: datetime
+    body: str
+
+# body and the comments hold plain text, GitHub's rendering of the markdown.
+# linked_prs counts the open pull requests GitHub knows will close this issue,
+# a pull request that only mentions it is not in there. comments is the last
+# few, oldest first, and comment_count all of them.
+@dataclass(frozen=True, slots=True)
+class Issue:
+    number: int
+    title: str
+    body: str
+    author: Actor
+    created_at: datetime
+    updated_at: datetime
+    labels: tuple[str, ...]
+    assigned: bool
+    linked_prs: int
+    comment_count: int
+    comments: tuple[IssueComment, ...] = ()
+
+# issues keeps the order GitHub sent, last updated first.
+@dataclass(frozen=True, slots=True)
+class IssueFetch:
+    fetched_at: datetime
+    issues: tuple[Issue, ...]

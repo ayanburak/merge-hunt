@@ -5,7 +5,7 @@ Tests for github/client.py. Requests never leave the machine, httpx's
 MockTransport hands every request to a function in the test that decides the
 answer. Waits are recorded by a fake sleep and take no time.
 
-description: Checks paging of pull requests, commits and repo search, error handling and the wait and retry rules of GitHubClient.
+description: Checks paging of pull requests, commits, issues and repo search, error handling and the wait and retry rules of GitHubClient.
 """
 
 import asyncio
@@ -25,7 +25,7 @@ from merge_hunt.github.client import (
     RateLimitWait,
     WaitReason,
 )
-from merge_hunt.github.queries import COMMIT_PAGE_SIZE, PULL_REQUEST_PAGE_SIZE, SEARCH_PAGE_SIZE
+from merge_hunt.github.queries import COMMIT_PAGE_SIZE, ISSUE_PAGE_SIZE, PULL_REQUEST_PAGE_SIZE, SEARCH_PAGE_SIZE
 from merge_hunt.github.token import StaticTokenProvider
 
 # --- Helpers ---
@@ -321,3 +321,34 @@ def test_requests_go_out_one_at_a_time():
 
     run(handler, both)
     assert peak == 1
+
+# --- Issues ---
+
+def issue_page(number: int, has_next: bool, cursor: str = "next") -> httpx.Response:
+    item = {
+        "number": number,
+        "title": "Fix it",
+        "bodyText": "",
+        "createdAt": "2026-01-01T10:00:00Z",
+        "updatedAt": "2026-02-01T10:00:00Z",
+        "author": None,
+        "labels": {"nodes": []},
+        "assignees": {"totalCount": 0},
+        "closedByPullRequestsReferences": {"totalCount": 0},
+        "comments": {"totalCount": 0, "nodes": []},
+    }
+    data = {"repository": {"issues": {"pageInfo": {"hasNextPage": has_next, "endCursor": cursor}, "nodes": [item]}}}
+    return httpx.Response(200, json={"data": data})
+
+def test_issues_follow_pages_and_send_labels():
+    handler, seen = scripted(issue_page(1, True, "c1"), issue_page(2, False))
+    issues = run(handler, lambda client: client.issues("owner", "repo", ("help wanted", "easy")))
+    assert [issue.number for issue in issues] == [1, 2]
+    assert seen[0]["variables"]["issueLabels"] == ["help wanted", "easy"]
+    assert seen[0]["variables"]["pageSize"] == ISSUE_PAGE_SIZE
+    assert seen[0]["variables"]["cursor"] is None and seen[1]["variables"]["cursor"] == "c1"
+
+def test_issues_stop_at_page_limit():
+    handler, seen = scripted(*[issue_page(number, True) for number in range(MAX_PAGES + 1)])
+    assert len(run(handler, lambda client: client.issues("owner", "repo", ("easy",)))) == MAX_PAGES
+    assert len(seen) == MAX_PAGES

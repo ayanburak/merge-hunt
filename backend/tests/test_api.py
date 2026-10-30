@@ -1,12 +1,12 @@
 """
 file: test_api.py
 
-Tests for main.py and the scan and profile endpoints. The app's real startup runs against
+Tests for main.py and the scan, profile and repo endpoints. The app's real startup runs against
 a SQLite file in pytest's temporary folder, then ScanJob is swapped for a fake
 so nothing reaches GitHub. Requests go through httpx's ASGITransport, the app
 is called directly without a server or a network.
 
-description: Checks the app's startup and shutdown and the answers of the scan and profile endpoints.
+description: Checks the app's startup and shutdown and the answers of the scan, profile and repo endpoints.
 """
 
 import asyncio
@@ -18,9 +18,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from merge_hunt.config import Settings
 from merge_hunt.api.schemas import ProfileSettings
-from merge_hunt.domain.models import Actor, Commit, CommitHistory, PullRequest, PullRequestHistory, Repo, RepoRef
+from merge_hunt.domain.models import Actor, Commit, CommitHistory, Issue, IssueComment, PullRequest, PullRequestHistory, Repo, RepoRef
 from merge_hunt.domain.scans import ScanStatus
 from merge_hunt.domain.scoring import FilterProfile
+from merge_hunt.github.client import GitHubQueryError
 from merge_hunt.jobs.scans import ScanAlreadyRunningError
 from merge_hunt.main import create_app
 from merge_hunt.pipeline.discovery import SearchSort
@@ -38,10 +39,10 @@ class FakeJob:
         self.busy = busy
         self.started: list = []
 
-    async def start(self, discovery, metrics) -> int:
+    async def start(self, discovery, metrics, issue_labels) -> int:
         if self.busy:
             raise ScanAlreadyRunningError("A scan is already running, only one can run at a time")
-        self.started.append((discovery, metrics))
+        self.started.append((discovery, metrics, issue_labels))
         return await self.scans.start({}, NOW)
 
     async def close(self) -> None:
@@ -93,7 +94,8 @@ def test_start_scan_returns_id_and_passes_options(tmp_path):
     response, scan, started = run(tmp_path, body)
     assert response.status_code == 202
     assert scan["status"] == ScanStatus.RUNNING and scan["stage"] == "DISCOVERY"
-    discovery, metrics = started[0]
+    discovery, metrics, labels = started[0]
+    assert labels == ["good first issue", "help wanted"]
     assert discovery.language == "Python" and discovery.sort is SearchSort.UPDATED_DESC
     assert discovery.min_prs == 30 and metrics.window_days == 120 and metrics.commit_days == 90
 
@@ -342,3 +344,83 @@ def test_saved_profile_fills_in_missing_fields(tmp_path):
 
     settings = run(tmp_path, body)
     assert settings["commit_target"] == 5 and settings["merge_rate"]["low"] == 0.5
+
+# --- Repos ---
+
+def api_issue(number: int, **fields) -> Issue:
+    base = dict(
+        number=number, title="Fix it", body="text", author=Actor("alice", False), created_at=NOW, updated_at=NOW,
+        labels=("help wanted",), assigned=False, linked_prs=0, comment_count=0,
+    )
+    return Issue(**(base | fields))
+
+def api_repo() -> Repo:
+    return Repo(5, "pallets", "click", 100, 10, "Python", "MIT", (), 3, NOW, None)
+
+# Replaces the GitHub side of the finder, so refresh can be told how to end.
+class FakeIssueClient:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list = []
+
+    async def issues(self, owner, name, labels, on_wait=None):
+        self.calls.append((owner, name, list(labels)))
+        if self.error:
+            raise self.error
+        return (api_issue(1),)
+
+def test_repo_issues_are_filtered_and_analyzed(tmp_path):
+    async def body(client, _):
+        state = client._transport.app.state
+        await state.repos.save_repos([api_repo()], NOW)
+        claim = IssueComment(Actor("bob", False), "NONE", NOW, "I'd like to work on this")
+        await state.issue_finder._store.save(5, [api_issue(1, comments=(claim,), comment_count=1), api_issue(2, assigned=True)], NOW)
+        default = (await client.get("/repos/5/issues")).json()
+        everything = (await client.get("/repos/5/issues", params={"hide_assigned": False})).json()
+        return default, everything
+
+    default, everything = run(tmp_path, body)
+    assert default["fetched_at"] and [item["issue"]["number"] for item in default["issues"]] == [1]
+    assert default["issues"][0]["analysis"]["claimed_at"]
+    assert len(everything["issues"]) == 2
+
+def test_repo_never_fetched_has_empty_issues(tmp_path):
+    async def body(client, _):
+        await client._transport.app.state.repos.save_repos([api_repo()], NOW)
+        return (await client.get("/repos/5/issues")).json()
+
+    assert run(tmp_path, body) == {"fetched_at": None, "issues": []}
+
+def test_issues_of_unknown_repo_is_404(tmp_path):
+    async def body(client, _):
+        return (await client.get("/repos/9/issues")).status_code, (await client.post("/repos/9/issues/refresh")).status_code
+
+    assert run(tmp_path, body) == (404, 404)
+
+def test_refresh_saves_new_issues(tmp_path):
+    async def body(client, _):
+        state = client._transport.app.state
+        await state.repos.save_repos([api_repo()], NOW)
+        fake = FakeIssueClient()
+        state.issue_finder._client = fake
+        response = await client.post("/repos/5/issues/refresh", params={"labels": ["easy"]})
+        return response.status_code, fake.calls, (await client.get("/repos/5/issues")).json()
+
+    code, calls, answer = run(tmp_path, body)
+    assert code == 204 and calls == [("pallets", "click", ["easy"])] and len(answer["issues"]) == 1
+
+def test_refresh_failure_is_bad_gateway(tmp_path):
+    async def body(client, _):
+        state = client._transport.app.state
+        await state.repos.save_repos([api_repo()], NOW)
+        state.issue_finder._client = FakeIssueClient(GitHubQueryError("nope"))
+        return await client.post("/repos/5/issues/refresh")
+
+    response = run(tmp_path, body)
+    assert response.status_code == 502 and response.json()["detail"] == "nope"
+
+def test_start_scan_refuses_empty_label_list(tmp_path):
+    async def body(client, _):
+        return (await client.post("/scans", json={"issue_labels": []})).status_code, (await client.post("/scans", json={"issue_labels": [" "]})).status_code
+
+    assert run(tmp_path, body) == (422, 422)

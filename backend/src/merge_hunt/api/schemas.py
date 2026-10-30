@@ -23,8 +23,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from merge_hunt.domain.metrics import MetricOptions
 from merge_hunt.domain.scoring import FilterProfile, Range, SavedProfile, Weights
 from merge_hunt.pipeline.discovery import MAX_CANDIDATES, DiscoveryOptions, SearchSort
+from merge_hunt.pipeline.issue_finder import DEFAULT_ISSUE_LABELS
 
 # --- Scans ---
+
+LabelName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 # The defaults repeat the ones in DiscoveryOptions and MetricOptions, a field
 # left out of the request gets the same value the domain would give it.
@@ -43,6 +46,7 @@ class ScanRequest(BaseModel):
     max_prs: int = Field(500, ge=0)
     window_days: int = Field(180, ge=1)
     commit_days: int = Field(90, ge=1)
+    issue_labels: list[LabelName] = Field(list(DEFAULT_ISSUE_LABELS), min_length=1)
 
     @model_validator(mode="after")
     def _ranges_in_order(self) -> Self:
@@ -53,7 +57,7 @@ class ScanRequest(BaseModel):
         return self
 
     def discovery_options(self) -> DiscoveryOptions:
-        return DiscoveryOptions(**self.model_dump(exclude={"window_days", "commit_days"}))
+        return DiscoveryOptions(**self.model_dump(exclude={"window_days", "commit_days", "issue_labels"}))
 
     def metric_options(self) -> MetricOptions:
         return MetricOptions(window_days=self.window_days, commit_days=self.commit_days)

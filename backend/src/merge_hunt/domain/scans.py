@@ -2,7 +2,7 @@
 file: scans.py
 importable: Scan, ScanDetail, ScanFailure, ScanStatus, ScanStage
 
-A scan is one run of discovery and enrichment that the user started. Scan is
+A scan is one run of discovery, enrichment and issue finding that the user started. Scan is
 how the database gives it back, with its state and its counts, the UI asks for
 it every few seconds while the scan runs. jobs/scans.py writes it, storage
 keeps it and api sends it out, so it lives here where all three can see it.
@@ -28,12 +28,14 @@ class ScanStatus(StrEnum):
 class ScanStage(StrEnum):
     DISCOVERY = "DISCOVERY"
     ENRICHMENT = "ENRICHMENT"
+    ISSUES = "ISSUES"
 
 # --- Scan ---
 
 # candidates is what the search found and skipped how many of them fell
 # outside the pull request range, both stay zero until discovery is done.
-# done and failed count the enriched repos, a fresh repo counts as done.
+# done and failed count the enriched repos, a fresh repo counts as done. A
+# failed issue fetch changes neither, the repo still has its scores.
 # waiting_until is set while GitHub's limits make the scan wait. options holds
 # what the scan was started with, as the JSON it was saved as.
 @dataclass(frozen=True, slots=True)
@@ -51,7 +53,8 @@ class Scan:
     waiting_until: datetime | None
     error: str | None
 
-# repo is the owner/name form, the same one people see on GitHub.
+# repo is the owner/name form, the same one people see on GitHub. A repo whose
+# issues could not be fetched is listed too, its scores are still there.
 @dataclass(frozen=True, slots=True)
 class ScanFailure:
     repo: str

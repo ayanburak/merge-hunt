@@ -1,7 +1,7 @@
 """
 file: queries.py
-importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, SEARCH_QUERY, PULL_REQUEST_COUNT_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE, SEARCH_PAGE_SIZE,
-    INTERACTION_LIMIT, LABEL_LIMIT, TOPIC_LIMIT
+importable: PULL_REQUESTS_QUERY, COMMITS_QUERY, SEARCH_QUERY, PULL_REQUEST_COUNT_QUERY, ISSUES_QUERY, PULL_REQUEST_PAGE_SIZE, COMMIT_PAGE_SIZE,
+    SEARCH_PAGE_SIZE, ISSUE_PAGE_SIZE, INTERACTION_LIMIT, LABEL_LIMIT, TOPIC_LIMIT, ISSUE_COMMENT_LIMIT
 
 GraphQL query texts sent to GitHub. PULL_REQUESTS_QUERY returns one page of a
 repo's pull requests, newest first, with everything parsing.py needs to build
@@ -18,6 +18,10 @@ qualifiers, pageSize, topics and cursor.
 
 PULL_REQUEST_COUNT_QUERY only asks for the number of results of an issue
 search, it takes query and the search text should hold repo and is:pr.
+
+ISSUES_QUERY returns one page of a repo's open issues carrying at least one of
+the given labels, last updated first. It takes owner, name, issueLabels,
+pageSize, labels, comments and cursor.
 
 description: The GraphQL queries the app sends to GitHub.
 """
@@ -50,6 +54,13 @@ LABEL_LIMIT = 10
 
 # Topics are kept for the user's topic filter, ten covers what most repos set.
 TOPIC_LIMIT = 10
+
+# With bodies and five comments each, a page of eighteen issues took two seconds
+# and two points of the quota when it was measured.
+ISSUE_PAGE_SIZE = 50
+
+# The newest comments are the ones that tell whether someone took the issue.
+ISSUE_COMMENT_LIMIT = 5
 
 # --- Queries ---
 
@@ -206,6 +217,63 @@ PULL_REQUEST_COUNT_QUERY = """
 query ($query: String!) {
   search(query: $query, type: ISSUE, first: 0) {
     issueCount
+  }
+}
+"""
+
+# GitHub reads the labels as an or, an issue with any of them comes back. first
+# is required on assignees and on the pull requests, only totalCount is used.
+# includeClosedPrs is off so a rejected attempt does not make an issue look
+# taken. bodyText is the plain text, nothing later needs the markdown.
+ISSUES_QUERY = """
+query ($owner: String!, $name: String!, $issueLabels: [String!], $pageSize: Int!, $labels: Int!, $comments: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(
+      states: OPEN
+      labels: $issueLabels
+      first: $pageSize
+      after: $cursor
+      orderBy: {field: UPDATED_AT, direction: DESC}
+    ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        number
+        title
+        bodyText
+        createdAt
+        updatedAt
+        author {
+          __typename
+          login
+        }
+        labels(first: $labels) {
+          nodes {
+            name
+          }
+        }
+        assignees(first: 1) {
+          totalCount
+        }
+        closedByPullRequestsReferences(first: 1, includeClosedPrs: false) {
+          totalCount
+        }
+        comments(last: $comments) {
+          totalCount
+          nodes {
+            author {
+              __typename
+              login
+            }
+            authorAssociation
+            createdAt
+            bodyText
+          }
+        }
+      }
+    }
   }
 }
 """

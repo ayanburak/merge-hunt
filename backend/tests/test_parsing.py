@@ -2,15 +2,15 @@
 file: test_parsing.py
 
 Tests for github/parsing.py. The nodes are written by hand in the shape
-PULL_REQUESTS_QUERY and COMMITS_QUERY return, so nothing here talks to GitHub.
+PULL_REQUESTS_QUERY, COMMITS_QUERY and ISSUES_QUERY return, so nothing here talks to GitHub.
 
-description: Checks that GitHub's pull request and commit nodes become the right domain objects.
+description: Checks that GitHub's pull request, commit and issue nodes become the right domain objects.
 """
 
 from datetime import UTC, datetime
 
 from merge_hunt.domain.models import Actor, CloseSource, Interaction
-from merge_hunt.github.parsing import GHOST, parse_commit, parse_pull_request, parse_repo
+from merge_hunt.github.parsing import GHOST, parse_commit, parse_issue, parse_pull_request, parse_repo
 
 # --- Helpers ---
 
@@ -166,3 +166,41 @@ def test_commit_without_account_becomes_ghost():
 def test_commit_without_account_but_bot_name_is_bot():
     commit = parse_commit(commit_node("renovate[bot]", None))
     assert commit.author == Actor("ghost", True)
+
+# --- Issues ---
+
+def issue_node(**fields) -> dict:
+    node = {
+        "number": 12,
+        "title": "Fix the docs",
+        "bodyText": "The page is wrong",
+        "createdAt": "2026-01-01T10:00:00Z",
+        "updatedAt": "2026-09-01T10:00:00Z",
+        "author": account("alice"),
+        "labels": {"nodes": [{"name": "good first issue"}]},
+        "assignees": {"totalCount": 0},
+        "closedByPullRequestsReferences": {"totalCount": 0},
+        "comments": {"totalCount": 0, "nodes": []},
+    }
+    return node | fields
+
+def test_issue_fields():
+    issue = parse_issue(issue_node())
+    assert (issue.number, issue.title, issue.body) == (12, "Fix the docs", "The page is wrong")
+    assert issue.author == Actor("alice", False) and issue.labels == ("good first issue",)
+    assert issue.updated_at == datetime(2026, 9, 1, 10, tzinfo=UTC)
+    assert not issue.assigned and issue.linked_prs == 0 and issue.comments == ()
+
+def test_issue_assignee_and_linked_pull_requests():
+    issue = parse_issue(issue_node(assignees={"totalCount": 2}, closedByPullRequestsReferences={"totalCount": 3}))
+    assert issue.assigned and issue.linked_prs == 3
+
+def test_issue_comment_keeps_author_and_total():
+    comment = {"author": account("stale", "Bot"), "authorAssociation": "NONE", "createdAt": "2026-02-01T10:00:00Z", "bodyText": "Ping"}
+    issue = parse_issue(issue_node(comments={"totalCount": 9, "nodes": [comment]}))
+    assert issue.comment_count == 9 and issue.comments[0].author.is_bot and issue.comments[0].body == "Ping"
+
+def test_issue_from_deleted_account_gets_ghost():
+    comment = {"author": None, "authorAssociation": "NONE", "createdAt": "2026-02-01T10:00:00Z", "bodyText": "Hi"}
+    issue = parse_issue(issue_node(author=None, comments={"totalCount": 1, "nodes": [comment]}))
+    assert issue.author == GHOST and issue.comments[0].author == GHOST

@@ -26,7 +26,7 @@ router = APIRouter(prefix="/scans", tags=["scans"])
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def start_scan(body: ScanRequest, request: Request) -> ScanCreated:
     try:
-        scan_id = await request.app.state.scan_job.start(body.discovery_options(), body.metric_options())
+        scan_id = await request.app.state.scan_job.start(body.discovery_options(), body.metric_options(), body.issue_labels)
     except ScanAlreadyRunningError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
     return ScanCreated(id=scan_id)

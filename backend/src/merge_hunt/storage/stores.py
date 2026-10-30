@@ -1,6 +1,6 @@
 """
 file: stores.py
-importable: RepoStore, ScanStore, ProfileStore, RepoNotFoundError, ProfileNameTakenError
+importable: RepoStore, ScanStore, ProfileStore, IssueStore, RepoNotFoundError, ProfileNameTakenError
 
 RepoStore reads and writes a repo, what discovery found out about it and its
 raw enrichment data. It is built
@@ -24,7 +24,10 @@ the middle of it always sees the last finished step.
 ProfileStore keeps the user's named profiles. It takes their settings as a
 JSON dict, turning that into a FilterProfile is the API's job.
 
-description: Saves and loads repos, their pull request and commit data, scans and profiles.
+IssueStore keeps the open issues last fetched for a repo, each fetch replaces
+the one before it.
+
+description: Saves and loads repos, their pull request, commit and issue data, scans and profiles.
 """
 
 # NOTE: save_enrichment does not merge with what is already there, it deletes
@@ -48,6 +51,9 @@ from merge_hunt.domain.models import (
     CommitHistory,
     Enrichment,
     Interaction,
+    Issue,
+    IssueComment,
+    IssueFetch,
     PullRequest,
     PullRequestHistory,
     Repo,
@@ -58,6 +64,9 @@ from merge_hunt.domain.scoring import SavedProfile
 from merge_hunt.storage.tables import (
     CommitRow,
     InteractionRow,
+    IssueCommentRow,
+    IssueFetchRow,
+    IssueRow,
     ProfileRow,
     PullRequestRow,
     RepoRow,
@@ -104,6 +113,28 @@ def _commit_row(repo_id: int, commit: Commit) -> CommitRow:
         author_login=commit.author.login,
         author_is_bot=commit.author.is_bot,
         committed_at=commit.committed_at,
+    )
+
+def _issue_row(repo_id: int, issue: Issue) -> IssueRow:
+    return IssueRow(
+        repo_id=repo_id,
+        number=issue.number,
+        title=issue.title,
+        body=issue.body,
+        author_login=issue.author.login,
+        author_is_bot=issue.author.is_bot,
+        created_at=issue.created_at,
+        updated_at=issue.updated_at,
+        labels=list(issue.labels),
+        assigned=issue.assigned,
+        linked_prs=issue.linked_prs,
+        comment_count=issue.comment_count,
+        comments=[
+            IssueCommentRow(
+                author_login=item.author.login, author_is_bot=item.author.is_bot, association=item.association, at=item.at, body=item.body
+            )
+            for item in issue.comments
+        ],
     )
 
 # --- Rows to Domain ---
@@ -158,6 +189,21 @@ def _scan(row: ScanRow) -> Scan:
         failed=row.failed,
         waiting_until=row.waiting_until,
         error=row.error,
+    )
+
+def _issue(row: IssueRow) -> Issue:
+    return Issue(
+        number=row.number,
+        title=row.title,
+        body=row.body,
+        author=Actor(row.author_login, row.author_is_bot),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        labels=tuple(row.labels),
+        assigned=row.assigned,
+        linked_prs=row.linked_prs,
+        comment_count=row.comment_count,
+        comments=tuple(IssueComment(Actor(item.author_login, item.author_is_bot), item.association, item.at, item.body) for item in row.comments),
     )
 
 def _profile(row: ProfileRow) -> SavedProfile:
@@ -367,6 +413,30 @@ class ScanStore:
                 row.failed += 1
             row.waiting_until = None
 
+    async def start_issues(self, scan_id: int) -> None:
+        """Moves the scan on to the issue stage."""
+        async with self._sessions.begin() as session:
+            row = await session.get(ScanRow, scan_id)
+            row.stage = ScanStage.ISSUES
+
+    # The counts stay as they are, enrichment went fine and the repo keeps its
+    # scores. The error is what makes it show up among the scan's failures.
+    async def record_issues(self, scan_id: int, repo_id: int, error: str | None) -> None:
+        """Records how fetching one repo's issues ended.
+
+        Args:
+            scan_id: The scan.
+            repo_id: The repo, one of those given to set_discovered.
+            error: Why it failed, None when it did not.
+        """
+        async with self._sessions.begin() as session:
+            if error is not None:
+                await session.execute(
+                    update(ScanRepoRow).where(ScanRepoRow.scan_id == scan_id, ScanRepoRow.repo_id == repo_id).values(error=error)
+                )
+            row = await session.get(ScanRow, scan_id)
+            row.waiting_until = None
+
     async def set_waiting(self, scan_id: int, until: datetime) -> None:
         """Records that the scan waits for GitHub until the given time."""
         async with self._sessions.begin() as session:
@@ -443,6 +513,53 @@ class ScanStore:
         async with self._sessions() as session:
             rows = await session.scalars(select(ScanRepoRow.repo_id).where(ScanRepoRow.scan_id == scan_id))
             return list(rows)
+
+# The only door to the issue tables, built like RepoStore. A fetch replaces the
+# whole list, an issue that was closed or lost its label must disappear.
+class IssueStore:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    # Deleting the issues takes their comments with them through the cascade,
+    # same as pull requests and their interactions.
+    async def save(self, repo_id: int, issues: Iterable[Issue], at: datetime) -> None:
+        """Replaces a repo's issues with a new fetch.
+
+        Either all of it is written or, when something fails, nothing changes.
+
+        Args:
+            repo_id: GitHub's numeric id of a saved repo.
+            issues: The fetched issues.
+            at: When they were fetched, timezone aware.
+
+        Raises:
+            RepoNotFoundError: The repo was never saved.
+        """
+        async with self._sessions.begin() as session:
+            if await session.get(RepoRow, repo_id) is None:
+                raise RepoNotFoundError(f"Repo {repo_id} is not saved, it has to be saved before its issues")
+            await session.execute(delete(IssueRow).where(IssueRow.repo_id == repo_id))
+            session.add_all(_issue_row(repo_id, issue) for issue in issues)
+            await session.merge(IssueFetchRow(repo_id=repo_id, fetched_at=at))
+
+    async def load(self, repo_id: int) -> IssueFetch | None:
+        """Loads a repo's last saved issues.
+
+        Args:
+            repo_id: GitHub's numeric id of the repo.
+
+        Returns:
+            The issues in the order they were saved, or None when they were
+            never fetched.
+        """
+        async with self._sessions() as session:
+            fetch = await session.get(IssueFetchRow, repo_id)
+            if fetch is None:
+                return None
+            rows = await session.scalars(
+                select(IssueRow).where(IssueRow.repo_id == repo_id).order_by(IssueRow.id).options(selectinload(IssueRow.comments))
+            )
+            return IssueFetch(fetch.fetched_at, tuple(_issue(row) for row in rows))
 
 # The profile names are unique, the database checks that, so two requests can
 # not slip past each other the way they could with a look before the write.

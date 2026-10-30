@@ -21,10 +21,12 @@ type Props = {
 
 type Discovery = { language: string | null; min_stars: number; max_stars: number };
 
+const STAGES: ScanDetail["stage"][] = ["DISCOVERY", "ENRICHMENT", "ISSUES"];
+
 // The steps follow the scan, a stopped scan marks the step it stopped on.
 function Steps({ scan }: { scan: ScanDetail }) {
   const stopped = scan.status === "FAILED" || scan.status === "INTERRUPTED";
-  const current = scan.stage === "DISCOVERY" ? 0 : 1;
+  const current = STAGES.indexOf(scan.stage);
   const state = (index: number) => {
     if (scan.status === "DONE" || index < current) return "done";
     if (index > current) return undefined;
@@ -33,7 +35,7 @@ function Steps({ scan }: { scan: ScanDetail }) {
 
   return (
     <ol className={styles.steps}>
-      {["Find repos", "Fetch their history", "Ready"].map((name, index) => (
+      {["Find repos", "Fetch their history", "Find issues", "Ready"].map((name, index) => (
         <li key={name} data-state={state(index)}>
           <i>{state(index) === "done" ? "✓" : index + 1}</i>
           {name}
@@ -57,6 +59,14 @@ function Headline({ scan, known, finished, kept }: { scan: ScanDetail; known: bo
       <>
         <p className={styles.headline}>Searching GitHub</p>
         <p className={styles.detail}>Finding repos and counting their pull requests.</p>
+      </>
+    );
+  }
+  if (scan.status === "RUNNING" && scan.stage === "ISSUES" && !scan.waiting_until) {
+    return (
+      <>
+        <p className={styles.headline}>Finding issues</p>
+        <p className={styles.detail}>Reading the open issues of the repos it fetched. This is the short part.</p>
       </>
     );
   }
@@ -95,7 +105,7 @@ function Headline({ scan, known, finished, kept }: { scan: ScanDetail; known: bo
 
 export function ScanProgress({ scan, unreachable, onNew }: Props) {
   const running = scan.status === "RUNNING";
-  const known = scan.stage === "ENRICHMENT" || !running;
+  const known = scan.stage !== "DISCOVERY" || !running;
   const kept = scan.candidates - scan.skipped;
   const finished = scan.done + scan.failed;
   const left = Math.max(0, kept - finished);
@@ -123,7 +133,7 @@ export function ScanProgress({ scan, unreachable, onNew }: Props) {
           {unreachable && <p className={styles.detail}><b>The backend is not reachable.</b> The numbers above may be old.</p>}
           {!running && scan.failures.length > 0 && (
             <div className={styles.failures}>
-              <p>{scan.failures.length} could not be fetched and are left out.</p>
+              <p>{scan.failures.length} could not be fetched completely.</p>
               <ul>
                 {scan.failures.map((failure) => (
                   <li key={failure.repo}><b>{failure.repo}</b>{failure.error}</li>

@@ -1,10 +1,11 @@
 """
 file: parsing.py
-importable: parse_pull_request, parse_commit, parse_repo, GHOST
+importable: parse_pull_request, parse_commit, parse_repo, parse_issue, GHOST
 
 parse_pull_request turns one pull request node from PULL_REQUESTS_QUERY into
 a PullRequest, parse_commit turns one commit node from COMMITS_QUERY into a
-Commit and parse_repo turns one search node from SEARCH_QUERY into a Repo.
+Commit, parse_repo turns one search node from SEARCH_QUERY into a Repo and
+parse_issue turns one node from ISSUES_QUERY into an Issue.
 It does no network work and no filtering, the window and the
 bot rules are applied later by the caller and by metrics.py.
 
@@ -18,7 +19,7 @@ description: Converts GitHub's GraphQL answers into domain objects.
 
 from datetime import datetime
 
-from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, PullRequest, Repo
+from merge_hunt.domain.models import Actor, CloseSource, Commit, Interaction, Issue, IssueComment, PullRequest, Repo
 
 # --- Accounts ---
 
@@ -145,4 +146,33 @@ def parse_repo(node: dict) -> Repo:
         open_issues=node["issues"]["totalCount"],
         pushed_at=_time(node["pushedAt"]),
         latest_release_at=_time(release["publishedAt"]) if release else None,
+    )
+
+# --- Issues ---
+
+def parse_issue(node: dict) -> Issue:
+    """Builds an Issue from one node of ISSUES_QUERY.
+
+    Args:
+        node: A single item of issues.nodes, as GitHub returned it.
+
+    Returns:
+        The issue with its label names and its last comments, oldest first.
+    """
+    comments = tuple(
+        IssueComment(_actor(item["author"]), item["authorAssociation"], _time(item["createdAt"]), item["bodyText"])
+        for item in node["comments"]["nodes"]
+    )
+    return Issue(
+        number=node["number"],
+        title=node["title"],
+        body=node["bodyText"],
+        author=_actor(node["author"]),
+        created_at=_time(node["createdAt"]),
+        updated_at=_time(node["updatedAt"]),
+        labels=tuple(item["name"] for item in node["labels"]["nodes"]),
+        assigned=node["assignees"]["totalCount"] > 0,
+        linked_prs=node["closedByPullRequestsReferences"]["totalCount"],
+        comment_count=node["comments"]["totalCount"],
+        comments=comments,
     )

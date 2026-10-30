@@ -127,14 +127,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/repos/{repo_id}/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Repo Issues */
+        get: operations["repo_issues_repos__repo_id__issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/issues/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Issues */
+        post: operations["refresh_issues_repos__repo_id__issues_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Actor */
+        Actor: {
+            /** Login */
+            login: string;
+            /** Is Bot */
+            is_bot: boolean;
+        };
+        /** AnalyzedIssue */
+        AnalyzedIssue: {
+            issue: components["schemas"]["Issue"];
+            analysis: components["schemas"]["IssueAnalysis"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Issue */
+        Issue: {
+            /** Number */
+            number: number;
+            /** Title */
+            title: string;
+            /** Body */
+            body: string;
+            author: components["schemas"]["Actor"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Labels */
+            labels: string[];
+            /** Assigned */
+            assigned: boolean;
+            /** Linked Prs */
+            linked_prs: number;
+            /** Comment Count */
+            comment_count: number;
+            /**
+             * Comments
+             * @default []
+             */
+            comments: components["schemas"]["IssueComment"][];
+        };
+        /** IssueAnalysis */
+        IssueAnalysis: {
+            /** Claimed At */
+            claimed_at?: string | null;
+        };
+        /** IssueComment */
+        IssueComment: {
+            author: components["schemas"]["Actor"];
+            /** Association */
+            association: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Body */
+            body: string;
         };
         /** MetricOptions */
         MetricOptions: {
@@ -330,6 +427,13 @@ export interface components {
             /** Latest Release At */
             latest_release_at: string | null;
         };
+        /** RepoIssues */
+        RepoIssues: {
+            /** Fetched At */
+            fetched_at: string | null;
+            /** Issues */
+            issues: components["schemas"]["AnalyzedIssue"][];
+        };
         /** RepoMetrics */
         RepoMetrics: {
             /** Accepted */
@@ -483,12 +587,20 @@ export interface components {
              * @default 90
              */
             commit_days: number;
+            /**
+             * Issue Labels
+             * @default [
+             *       "good first issue",
+             *       "help wanted"
+             *     ]
+             */
+            issue_labels: string[];
         };
         /**
          * ScanStage
          * @enum {string}
          */
-        ScanStage: "DISCOVERY" | "ENRICHMENT";
+        ScanStage: "DISCOVERY" | "ENRICHMENT" | "ISSUES";
         /**
          * ScanStatus
          * @enum {string}
@@ -857,6 +969,72 @@ export interface operations {
             header?: never;
             path: {
                 profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repo_issues_repos__repo_id__issues_get: {
+        parameters: {
+            query?: {
+                hide_assigned?: boolean;
+                hide_linked?: boolean;
+                max_age_days?: number | null;
+            };
+            header?: never;
+            path: {
+                repo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoIssues"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_issues_repos__repo_id__issues_refresh_post: {
+        parameters: {
+            query?: {
+                labels?: string[];
+            };
+            header?: never;
+            path: {
+                repo_id: number;
             };
             cookie?: never;
         };

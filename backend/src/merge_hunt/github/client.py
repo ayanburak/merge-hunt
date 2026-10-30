@@ -25,6 +25,9 @@ commits(owner, name, since) does the same for the commits on the default
 branch and returns a CommitHistory. Merge commits are left out, bot commits
 stay in and are only marked.
 
+issues(owner, name, labels) fetches the open issues carrying any of the labels,
+last updated first, and returns them as Issue objects.
+
 Requests go out one at a time. When GitHub says the quota is used up, asks to
 slow down or fails for a moment, the client waits and tries again by itself.
 Before each wait it calls the on_wait function given to pull_requests or
@@ -43,19 +46,22 @@ description: Async client for the GitHub API.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import httpx
 
-from merge_hunt.domain.models import Commit, CommitHistory, PullRequest, PullRequestHistory, Repo
-from merge_hunt.github.parsing import parse_commit, parse_pull_request, parse_repo
+from merge_hunt.domain.models import Commit, CommitHistory, Issue, PullRequest, PullRequestHistory, Repo
+from merge_hunt.github.parsing import parse_commit, parse_issue, parse_pull_request, parse_repo
 from merge_hunt.github.queries import (
     COMMIT_PAGE_SIZE,
     COMMITS_QUERY,
     INTERACTION_LIMIT,
+    ISSUE_COMMENT_LIMIT,
+    ISSUE_PAGE_SIZE,
+    ISSUES_QUERY,
     LABEL_LIMIT,
     PULL_REQUEST_COUNT_QUERY,
     PULL_REQUEST_PAGE_SIZE,
@@ -84,7 +90,8 @@ HTTP_TIMEOUT = 30.0
 
 # Ten pages of fifty is five hundred pull requests and about twenty points,
 # for commits it is a thousand commits and ten points. A repo with more in its
-# window is bigger than the ones this app looks for.
+# window is bigger than the ones this app looks for. For issues it keeps the
+# five hundred updated last.
 MAX_PAGES = 10
 
 # Three waits per request, then the error goes up to the caller. Retrying
@@ -431,3 +438,42 @@ class GitHubClient:
                 break
             cursor = page["pageInfo"]["endCursor"]
         return repos
+
+    # Newest updates come first, so what MAX_PAGES cuts off is the part of a
+    # very long list nobody touched for the longest time.
+    async def issues(self, owner: str, name: str, labels: Sequence[str], on_wait: WaitListener | None = None) -> tuple[Issue, ...]:
+        """Fetches a repo's open issues that carry any of the given labels.
+
+        Args:
+            owner: The user or organization that owns the repo.
+            name: The repo name.
+            labels: The label names, GitHub matches them exactly.
+            on_wait: Called before every wait caused by a limit or a server
+                error. When missing, waits are logged as warnings.
+
+        Returns:
+            The issues, last updated first.
+
+        Raises:
+            GitHubAuthError: The token was rejected.
+            GitHubQueryError: GitHub could not answer, for example the repo does not exist.
+            httpx.HTTPStatusError: GitHub kept failing after every retry.
+        """
+        issues: list[Issue] = []
+        cursor = None
+        for _ in range(MAX_PAGES):
+            variables = {
+                "owner": owner,
+                "name": name,
+                "issueLabels": list(labels),
+                "pageSize": ISSUE_PAGE_SIZE,
+                "labels": LABEL_LIMIT,
+                "comments": ISSUE_COMMENT_LIMIT,
+                "cursor": cursor,
+            }
+            page = (await self._graphql(ISSUES_QUERY, variables, on_wait))["repository"]["issues"]
+            issues.extend(parse_issue(node) for node in page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+        return tuple(issues)

@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from merge_hunt.api.routes.profiles import router as profiles_router
+from merge_hunt.api.routes.repos import router as repos_router
 from merge_hunt.api.routes.scans import router as scans_router
 from merge_hunt.config import Settings, WebSettings
 from merge_hunt.github.client import HTTP_TIMEOUT, GitHubClient
@@ -38,9 +39,11 @@ from merge_hunt.github.token import StaticTokenProvider
 from merge_hunt.jobs.scans import ScanJob
 from merge_hunt.pipeline.discovery import Discoverer
 from merge_hunt.pipeline.enrichment import Enricher
+from merge_hunt.pipeline.issue_analysis import RuleIssueAnalyzer
+from merge_hunt.pipeline.issue_finder import IssueFinder
 from merge_hunt.pipeline.scoring import Scorer
 from merge_hunt.storage.database import create_engine, create_tables
-from merge_hunt.storage.stores import ProfileStore, RepoStore, ScanStore
+from merge_hunt.storage.stores import IssueStore, ProfileStore, RepoStore, ScanStore
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +73,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("%d scan left unfinished by the last run marked INTERRUPTED", interrupted)
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
                 client = GitHubClient(StaticTokenProvider(config.github_token), http)
-                job = ScanJob(Discoverer(client, repos), Enricher(client, repos), scans)
+                finder = IssueFinder(client, IssueStore(sessions), RuleIssueAnalyzer())
+                job = ScanJob(Discoverer(client, repos), Enricher(client, repos), finder, scans)
+                app.state.repos = repos
                 app.state.scans = scans
+                app.state.issue_finder = finder
                 app.state.profiles = ProfileStore(sessions)
                 app.state.scorer = Scorer(repos)
                 app.state.scan_job = job
@@ -91,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(scans_router)
     app.include_router(profiles_router)
+    app.include_router(repos_router)
     return app
 
 app = create_app()

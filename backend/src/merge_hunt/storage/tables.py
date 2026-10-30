@@ -1,6 +1,6 @@
 """
 file: tables.py
-importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow, ScanRow, ScanRepoRow
+importable: Base, RepoRow, PullRequestRow, InteractionRow, CommitRow, ScanRow, ScanRepoRow, ProfileRow, IssueRow, IssueCommentRow, IssueFetchRow
 
 The SQLAlchemy classes behind the database tables. One object of a Row class
 is one row of its table. They mirror the classes in domain/models.py but stay
@@ -11,7 +11,7 @@ An Actor is not a table of its own, it is two columns wherever it is used, a
 login and an is_bot. is_bot is decided differently for pull requests and for
 commits, so one shared accounts table could not hold a single right value.
 
-description: Database tables for repos, their raw pull request and commit data, and the scans that fetched them.
+description: Database tables for repos, their raw pull request, commit and issue data, and the scans that fetched them.
 """
 
 # NOTE: Deleting a repo's pull requests also deletes their interactions through
@@ -167,3 +167,45 @@ class ProfileRow(Base):
     settings: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime)
+
+# Rows are read back ordered by id, which keeps GitHub's order, last updated
+# first. labels is a JSON list for the same reason as on pull requests.
+class IssueRow(Base):
+    __tablename__ = "issues"
+    __table_args__ = (UniqueConstraint("repo_id", "number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id", ondelete="CASCADE"))
+    number: Mapped[int]
+    title: Mapped[str]
+    body: Mapped[str]
+    author_login: Mapped[str]
+    author_is_bot: Mapped[bool]
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    labels: Mapped[list[str]] = mapped_column(JSON)
+    assigned: Mapped[bool]
+    linked_prs: Mapped[int]
+    comment_count: Mapped[int]
+
+    comments: Mapped[list["IssueCommentRow"]] = relationship(order_by="IssueCommentRow.id", passive_deletes=True)
+
+class IssueCommentRow(Base):
+    __tablename__ = "issue_comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id", ondelete="CASCADE"), index=True)
+    author_login: Mapped[str]
+    author_is_bot: Mapped[bool]
+    association: Mapped[str]
+    at: Mapped[datetime] = mapped_column(UtcDateTime)
+    body: Mapped[str]
+
+# One row per repo whose issues were fetched at least once. It lives apart from
+# repos so a new column there is not needed, and it tells a repo with no issues
+# from a repo nobody looked at.
+class IssueFetchRow(Base):
+    __tablename__ = "issue_fetches"
+
+    repo_id: Mapped[int] = mapped_column(ForeignKey("repos.id", ondelete="CASCADE"), primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column(UtcDateTime)
