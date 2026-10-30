@@ -3,7 +3,7 @@ file: scoring.py
 importable: Scorer
 
 Scorer is the third stage of the scan. It is built with a RepoStore and an
-IssueStore, score(repo_ids, profile) reads each repo's saved data, scores it with
+IssueFinder, score(repo_ids, profile) reads each repo's saved data, scores it with
 domain/scoring.py and returns the repos best first. It never talks to GitHub,
 so when the user changes a filter or a weight the same repos can be scored
 again right away without a new scan.
@@ -21,12 +21,13 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from merge_hunt.domain.scoring import FilterProfile, ScoredRepo, covers_window, score_repo
-from merge_hunt.storage.stores import IssueStore, RepoStore
+from merge_hunt.pipeline.issue_finder import IssueFinder
+from merge_hunt.storage.stores import RepoStore
 
 # clock is passed in like in Enricher, so tests can fix the day the windows
 # are counted back from.
 class Scorer:
-    def __init__(self, store: RepoStore, issues: IssueStore, clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+    def __init__(self, store: RepoStore, issues: IssueFinder, clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self._store = store
         self._issues = issues
         self._clock = clock

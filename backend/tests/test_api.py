@@ -378,8 +378,8 @@ def test_repo_issues_are_filtered_and_analyzed(tmp_path):
         await state.repos.save_repos([api_repo()], NOW)
         claim = IssueComment(Actor("bob", False), "NONE", NOW, "I'd like to work on this")
         await state.issue_finder._store.save(5, [api_issue(1, comments=(claim,), comment_count=1), api_issue(2, assigned=True)], ("easy",), NOW)
-        default = (await client.get("/repos/5/issues")).json()
-        everything = (await client.get("/repos/5/issues", params={"hide_assigned": False})).json()
+        default = (await client.get("/repos/5/issues", params={"show_hidden": True})).json()
+        everything = (await client.get("/repos/5/issues", params={"hide_assigned": False, "show_hidden": True})).json()
         return default, everything
 
     default, everything = run(tmp_path, body)
@@ -392,7 +392,7 @@ def test_repo_never_fetched_has_empty_issues(tmp_path):
         await client._transport.app.state.repos.save_repos([api_repo()], NOW)
         return (await client.get("/repos/5/issues")).json()
 
-    assert run(tmp_path, body) == {"fetched_at": None, "labels": [], "issues": []}
+    assert run(tmp_path, body) == {"fetched_at": None, "labels": [], "issues": [], "hidden": 0}
 
 def test_issues_of_unknown_repo_is_404(tmp_path):
     async def body(client, _):

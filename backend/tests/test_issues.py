@@ -16,10 +16,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from merge_hunt.domain.issues import FeedbackValue, IssueFilter, is_shown
+from merge_hunt.domain.issues import FeedbackValue, HideReason, IssueFilter, is_shown
 from merge_hunt.domain.models import Actor, Issue, IssueComment, RepoRef
 from merge_hunt.github.client import GitHubAuthError, GitHubQueryError
-from merge_hunt.pipeline.issue_analysis import CLAIM_MAX_LENGTH, RuleIssueAnalyzer
+from merge_hunt.pipeline.issue_analysis import CLAIM_HEAD, CLAIM_HIDE_DAYS, RuleIssueAnalyzer
 from merge_hunt.pipeline.issue_finder import RECENT_ISSUE_DAYS, IssueFetchError, IssueFinder
 from merge_hunt.storage.database import create_engine, create_tables
 from merge_hunt.storage.stores import IssueStore, RepoNotFoundError, RepoStore
@@ -80,7 +80,7 @@ def run(body):
     return asyncio.run(main())
 
 def finder_for(store: IssueStore, answers: dict) -> IssueFinder:
-    return IssueFinder(FakeClient(answers), store, RuleIssueAnalyzer(), clock=lambda: NOW)
+    return IssueFinder(FakeClient(answers), store, RuleIssueAnalyzer(lambda: NOW), clock=lambda: NOW)
 
 # --- Filter ---
 
@@ -126,8 +126,61 @@ def test_claim_is_found(text):
 def test_ordinary_comment_is_no_claim(text):
     assert not claimed(text)
 
-def test_long_comment_is_no_claim():
-    assert not claimed("I'd like to work on this. " + "x" * CLAIM_MAX_LENGTH)
+def test_claim_counts_at_the_start_of_a_long_comment():
+    assert claimed("I'd like to work on this. " + "x" * 2000)
+
+def test_same_words_deep_in_a_comment_are_no_claim():
+    assert not claimed("x" * CLAIM_HEAD + " I'd like to work on this")
+
+def hide_of(issue: Issue):
+    return asyncio.run(RuleIssueAnalyzer(lambda: NOW).analyze(issue)).hide
+
+@pytest.mark.parametrize("text", [
+    "I picked this up and will submit PR soon",
+    "Happy to pick this up if it's still open",
+    "I plan to fix a remaining gap in the metrics",
+    "Hi, is this still available?",
+    "Opened #4759 for this",
+    "PR with the fix and tests: https://example.com",
+])
+def test_new_claim_phrases_hide_the_issue(text):
+    assert hide_of(make_issue(comments=(comment(text),))) is HideReason.CLAIMED
+
+def test_old_claim_warns_but_keeps_the_issue():
+    old = NOW - timedelta(days=CLAIM_HIDE_DAYS + 1)
+    issue = make_issue(comments=(comment("I'll take it", at=old),))
+    analysis = asyncio.run(RuleIssueAnalyzer(lambda: NOW).analyze(issue))
+    assert analysis.claimed_at == old and analysis.hide is None
+
+def test_stepping_back_frees_the_issue():
+    issue = make_issue(comments=(comment("I'd like to work on this"), comment("I'm stepping back from this issue")))
+    assert hide_of(issue) is None
+
+def test_maintainer_approval_counts_as_a_claim():
+    approval = IssueComment(ALICE, "COLLABORATOR", NOW, "@someone go ahead!")
+    assert hide_of(make_issue(comments=(approval,))) is HideReason.CLAIMED
+
+def test_outsider_saying_go_ahead_is_no_claim():
+    assert hide_of(make_issue(comments=(comment("@someone go ahead!"),))) is None
+
+@pytest.mark.parametrize("text", [
+    "This appears to have been fixed by e818623",
+    "This has been resolved in line 14. Kindly close this issue.",
+    "I think this one is no longer applicable",
+])
+def test_comment_saying_it_is_solved_hides_the_issue(text):
+    assert hide_of(make_issue(comments=(comment(text),))) is HideReason.SOLVED
+
+@pytest.mark.parametrize("label", ["needs-discussion", "stale", "Blocked", "won't fix"])
+def test_label_that_says_wait_hides_the_issue(label):
+    assert hide_of(make_issue(labels=(label,))) is HideReason.NOT_READY
+
+@pytest.mark.parametrize("title", ["Why int and not float?", "Question: naming", "Quick survey for maintainers", "Tracking issue for v2"])
+def test_title_that_is_no_task_hides_the_issue(title):
+    assert hide_of(make_issue(title=title)) is HideReason.NOT_A_TASK
+
+def test_plain_issue_is_not_hidden():
+    assert hide_of(make_issue(title="Fix the parser", labels=("bug",))) is None
 
 def test_bot_comment_is_no_claim():
     issue = make_issue(comments=(comment("I will work on this", author=Actor("helper", True)),))
@@ -237,7 +290,7 @@ def test_load_filters_analyzes_and_puts_the_newest_first():
 
     async def body(store, _):
         await store.save(CLICK.id, issues, ("easy",), NOW)
-        return await finder_for(store, {}).load(CLICK.id, IssueFilter())
+        return await finder_for(store, {}).load(CLICK.id, IssueFilter(show_hidden=True))
 
     answer = run(body)
     assert answer.fetched_at == NOW and answer.labels == ("easy",)
@@ -336,13 +389,34 @@ def test_free_counts_skip_taken_issues_and_never_fetched_repos():
     async def body(store, _):
         await store.save(CLICK.id, issues, (), NOW)
         await store.save_feedback(CLICK.id, 4, FeedbackValue.SKIPPED, NOW)
-        return await store.free_counts([CLICK.id, FLASK.id])
+        return await finder_for(store, {}).free_counts([CLICK.id, FLASK.id])
 
     assert run(body) == {CLICK.id: 1}
+
+def test_free_counts_leave_out_what_the_analyzer_hides():
+    issues = [make_issue(1), make_issue(2, title="Why is this slow?")]
+
+    async def body(store, _):
+        await store.save(CLICK.id, issues, (), NOW)
+        return await finder_for(store, {}).free_counts([CLICK.id])
+
+    assert run(body) == {CLICK.id: 1}
+
+def test_hidden_issue_comes_back_when_asked_for():
+    issues = [make_issue(1), make_issue(2, title="Why is this slow?")]
+
+    async def body(store, _):
+        await store.save(CLICK.id, issues, (), NOW)
+        finder = finder_for(store, {})
+        return await finder.load(CLICK.id, IssueFilter()), await finder.load(CLICK.id, IssueFilter(show_hidden=True))
+
+    plain, everything = run(body)
+    assert [item.issue.number for item in plain.issues] == [1] and plain.hidden == 1
+    assert len(everything.issues) == 2 and everything.hidden == 1
 
 def test_free_counts_tell_zero_from_never_fetched():
     async def body(store, _):
         await store.save(CLICK.id, [make_issue(1, assigned=True)], (), NOW)
-        return await store.free_counts([CLICK.id, FLASK.id])
+        return await finder_for(store, {}).free_counts([CLICK.id, FLASK.id])
 
     assert run(body) == {CLICK.id: 0}

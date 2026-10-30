@@ -39,9 +39,10 @@ async def repo_issues(
     hide_linked: bool = True,
     max_age_days: int | None = Query(None, ge=1),
     show_skipped: bool = False,
+    show_hidden: bool = False,
 ) -> RepoIssues:
     await _known_repo(repo_id, request)
-    options = IssueFilter(hide_assigned, hide_linked, max_age_days, show_skipped)
+    options = IssueFilter(hide_assigned, hide_linked, max_age_days, show_skipped, show_hidden)
     return await request.app.state.issue_finder.load(repo_id, options)
 
 # 502 because the request itself was fine, GitHub is the one that failed.

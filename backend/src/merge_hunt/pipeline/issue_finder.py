@@ -148,7 +148,27 @@ class IssueFinder:
         newest = sorted(fetch.issues, key=lambda issue: issue.created_at, reverse=True)
         shown = [issue for issue in newest if is_shown(issue, options, now, feedback.get(issue.number))]
         analyzed = [AnalyzedIssue(issue, await self._analyzer.analyze(issue), feedback.get(issue.number)) for issue in shown]
-        return RepoIssues(fetch.fetched_at, fetch.labels, tuple(analyzed))
+        kept = [item for item in analyzed if options.show_hidden or item.analysis.hide is None]
+        hidden = sum(item.analysis.hide is not None for item in analyzed)
+        return RepoIssues(fetch.fetched_at, fetch.labels, tuple(kept), hidden)
+
+    # The count has to match what the repo page shows by default, so it goes
+    # through the same steps as load and not through a query of its own.
+    async def free_counts(self, repo_ids: Iterable[int]) -> dict[int, int]:
+        """Counts the issues each repo shows with the default filter.
+
+        Args:
+            repo_ids: GitHub's numeric ids of the repos.
+
+        Returns:
+            The count per repo. A repo whose issues were never fetched is left out.
+        """
+        counts = {}
+        for repo_id in repo_ids:
+            issues = await self.load(repo_id, IssueFilter())
+            if issues.fetched_at is not None:
+                counts[repo_id] = len(issues.issues)
+        return counts
 
     async def give_feedback(self, repo_id: int, number: int, value: FeedbackValue) -> bool:
         """Records the user's feedback on an issue.

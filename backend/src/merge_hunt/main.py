@@ -80,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.scans = scans
                 app.state.issue_finder = finder
                 app.state.profiles = ProfileStore(sessions)
-                app.state.scorer = Scorer(repos, issues)
+                app.state.scorer = Scorer(repos, finder)
                 app.state.scan_job = job
                 try:
                     yield

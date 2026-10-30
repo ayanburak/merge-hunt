@@ -565,32 +565,6 @@ class IssueStore:
             )
             return IssueFetch(fetch.fetched_at, tuple(fetch.labels), tuple(_issue(row) for row in rows))
 
-    # One query for all repos, the results page asks this for a whole scan on
-    # every filter change. The conditions are the ones of the default IssueFilter.
-    async def free_counts(self, repo_ids: Iterable[int]) -> dict[int, int]:
-        """Counts the issues a repo shows by default, not assigned, not linked and not skipped.
-
-        Args:
-            repo_ids: GitHub's numeric ids of the repos.
-
-        Returns:
-            The count per repo. A repo whose issues were never fetched is left out.
-        """
-        repo_ids = list(repo_ids)
-        skipped = select(IssueFeedbackRow.id).where(
-            IssueFeedbackRow.repo_id == IssueRow.repo_id,
-            IssueFeedbackRow.number == IssueRow.number,
-            IssueFeedbackRow.value == FeedbackValue.SKIPPED,
-        )
-        async with self._sessions() as session:
-            fetched = await session.scalars(select(IssueFetchRow.repo_id).where(IssueFetchRow.repo_id.in_(repo_ids)))
-            counts = await session.execute(
-                select(IssueRow.repo_id, func.count())
-                .where(IssueRow.repo_id.in_(repo_ids), IssueRow.assigned.is_(False), IssueRow.linked_prs == 0, ~skipped.exists())
-                .group_by(IssueRow.repo_id)
-            )
-            return dict.fromkeys(fetched, 0) | dict(counts.all())
-
     # The copy of the issue is taken here, while its row is still there. Pressing
     # the other button overwrites the value and takes a new copy.
     async def save_feedback(self, repo_id: int, number: int, value: FeedbackValue, at: datetime) -> bool:
