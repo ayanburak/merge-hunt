@@ -178,7 +178,7 @@ export function ScanForm({ defaults, lastDone, error, busy, onStart }: Props) {
             </div>
           </div>
           <div className={styles.control}>
-            <label className={styles.label} htmlFor="issue-labels"><span>Issue labels to fetch</span><span className={styles.hint}>Exact names</span></label>
+            <label className={styles.label} htmlFor="issue-labels"><span>Issue labels to fetch</span><span className={styles.hint}>Full name, any case</span></label>
             <IssueLabels labels={options.issue_labels} onChange={(issue_labels) => set({ issue_labels })} />
           </div>
         </div>
