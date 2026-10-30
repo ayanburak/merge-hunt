@@ -13,6 +13,3 @@ backend/data/
 # Node
 node_modules/
 frontend/dist/
-
-# Design mockups, kept until the React pages replace them
-frontend/mockup/
