@@ -1,0 +1,1041 @@
+{
+ "fetched_at": "2026-10-30T20:59:00.669638+00:00",
+ "issues": [
+  {
+   "repo": "shapely/shapely",
+   "number": 2549,
+   "verdict": "FREE",
+   "title": "ops.nearest_points fails on GeoSeries or array of geometries",
+   "body": "shapely.ops.nearest_points used to accept GeoSeries or arrays of geometries as inputs, but now only accepts single geometries.\nThis fails in shapely 2.2.0 (but works in shapely 2.1.2):\nfrom geopandas import GeoSeries\nfrom shapely.geometry import Point\nfrom shapely.ops import nearest_points\nnearest_points(\n    GeoSeries([Point(1,1)]).values,\n    GeoSeries([Point(1,10)]).values,\n)\nThis still works:\nnearest_points(Point(1,1), Point(1,10))",
+   "labels": [],
+   "created_at": "2026-10-28T13:30:53+00:00",
+   "updated_at": "2026-10-30T18:09:41+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-28T14:31:21+00:00",
+     "body": "I see now that i can combine shortest_line with get_point to recreate ops.nearest_point for now.\nfrom geopandas import GeoSeries\nfrom shapely.geometry import Point\nfrom shapely import shortest_line\nfrom shapely import get_point\nget_point(shortest_line(\n    GeoSeries([Point(1,1)]).values,\n    GeoSeries([Point(1,10)]).values,\n), 1)"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-30T18:09:41+00:00",
+     "body": "This looks like it came from #2355, which switched nearest_points in shapely/ops.py from shapely.get_point(seq, 0/1) to shapely.lib.get_point_scalar(seq, 0/1) for speed. shortest_line still returns an array for array input, but the scalar version only accepts a single geometry, hence the TypeError. I can reproduce it on 2.2.0 with plain numpy object arrays too, so it's not GeoPandas-specific, and 2.1.2 returns arrays as before.\nKeeping the fast path only for the scalar case fixes it locally:\nif isinstance(seq, BaseGeometry):\n    return shapely.lib.get_point_scalar(seq, 0), shapely.lib.get_point_scalar(seq, 1)\nreturn shapely.get_point(seq, 0), shapely.get_point(seq, 1)\nWith that, scalar inputs return points as before, and array or mixed array/scalar inputs return arrays like in 2.1.2."
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2548,
+   "verdict": "FREE",
+   "title": "GeometryCollection.geoms loses element type information under Pyright strict mode",
+   "body": "When narrowing a BaseGeometry using isinstance(geometry, GeometryCollection), Pyright cannot infer the type of elements returned by geometry.geoms.\nThe elements are inferred as Any, triggering strict typing diagnostics.\nBy contrast, an explicitly parameterized GeometryCollection[BaseGeometry] correctly returns BaseGeometry elements . The Multi* version returns the corresponding elements (MultiLineString.geoms -> LineString and so on).\nExpected behavior\nIterating over GeometryCollection.geoms should provide at least BaseGeometry as the element type, without requiring explicit generic parameters or casts.\nActual behavior\nPyright reports reportUnknownMemberType and reportUnknownVariableType after narrowing with isinstance.\nWorkaround\nInstead of calling directly isinstance method, this function can be called and the types are not complaining anymore.\ndef is_geometry_collection(\n    geometry: BaseGeometry,\n) -> TypeGuard[GeometryCollection[BaseGeometry]]:\n    return isinstance(geometry, GeometryCollection)\n\nReproduction\nThe base repro.py\n\"\"\"Minimal static typing reproduction for Shapely GeometryCollection.geoms.\n\nRun `uv run pyright` (do not execute this file with Python).\n\"\"\"\nfrom typing import reveal_type\n\nfrom shapely.geometry import GeometryCollection, MultiLineString\nfrom shapely.geometry.base import BaseGeometry\n\n\ndef reproduced_issue(geometry: BaseGeometry) -> None:\n    if isinstance(geometry, GeometryCollection):\n        reveal_type(geometry.geoms)\n        for part in geom",
+   "labels": [
+    "typing"
+   ],
+   "created_at": "2026-10-27T18:25:34+00:00",
+   "updated_at": "2026-10-28T10:10:06+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-28T08:12:23+00:00",
+     "body": "@xaldyz thanks for the report. In general, the typing situation of shapely is not in a very good state (see #721).\nSo I am actually also surprised that for a MultiLineString, it knows that the .geoms items are LineStrings. That might indicate you are actually using not just shapely itself (we don't have type annotations for the geoms attribute), but maybe you have type stubs installed? (https://pypi.org/project/types-shapely/) In that case, this might be an issue with those stubs (https://github.com/python/typeshed/blob/main/stubs/shapely/shapely/geometry/base.pyi)"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-28T10:10:06+00:00",
+     "body": "Thank you for the answer!\nMy apologies, I didn't fully check in depth everything before posting.\nI am using Visual Studio Code as my IDE (or enhanched text editor, the battle is open 😄) with Pylance extension, and the Intellisense just helped me navigate through it.\nAfter a more in-depth review of the issue and that discussion (which I read, but apparently without the appropriate attention level) I confirm what you suspected: under the hood, both pylance (for VSCode) and pyright (for CLI) uses typeshed under the hood.\nThe reason I didn't caught them is because the typeshed is embedded in pyright, not imported as a package. I trusted the output of uv sync a little bit too much and inferred the types-shapely was just not present.\n$ uv sync\nUsing CPython 3.12.13 interpreter at: /usr/bin/pytho"
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2530,
+   "verdict": "NOT_A_TASK",
+   "title": "Clear floating-point exceptions status after calling GEOS? (avoid all NumPy RuntimeWarnings)",
+   "body": "We regularly run into Floating-point Exceptions being set by code in GEOS. The NumPy ufunc machinery then picks this up and turns it into a python RuntimeWarning visible for the user (but one they cannot do anything about it, since it happens inside the GEOS code). While the warning is typically harmless, it is still confusing for the user to see and annoying to have to silence.\nSome examples: pygeos/pygeos#404, pygeos/pygeos#167, #1345, #1552, #1709, #1840, #2045, #2215\nSeveral of those have been reported upstream to GEOS and sometimes also fixed (libgeos/geos#515, libgeos/geos#806, libgeos/geos#1048, libgeos/geos#1235, libgeos/geos#1492, libgeos/geos#1555)\nBut addressing this upstream in GEOS is often not that easy to diagnose and fix (and it also does not always result in a real improvement to the GEOS code, since sometimes the exceptions get set due to compiler optimizations or are hardware/compiler dependent).\nWe could also suppress those on the Shapely side (essentially call feclearexcept at the end of each ufunc inner function after any GEOS interaction (or catch/restore the flag), such that NumPy does not see the flag)\nThat would, with a relatively simple change, do away with all those warning related issues. At the same time it would suppress potentially actionable warnings (where there is an actual issue in the GEOS code). But seeing how often this comes up on our issue tracker, I think the benefit of not having to deal with those would be worth it (also, before sha",
+   "labels": [],
+   "created_at": "2026-10-08T13:04:02+00:00",
+   "updated_at": "2026-10-20T08:27:54+00:00",
+   "linked_prs": 0,
+   "comment_count": 7,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-09T16:30:05+00:00",
+     "body": "Happy to take this if you'd like a PR: clear the floating-point exception flags after each GEOS call in the ufunc inner loops (save/restore the FP environment around the call), with tests that the reproducers from the linked issues no longer emit RuntimeWarning. Should I also add the optional informative NaN warning, or keep this PR to silencing only?"
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-10-09T16:33:34+00:00",
+     "body": "No thank you @bhaskargurram-ai"
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-09T16:34:25+00:00",
+     "body": "@bhaskargurram-ai no need for that right now. As I framed the top post, this is an issue first to discuss. I also already have a prototype myself that I used to quickly validate what I wrote above."
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-20T06:51:14+00:00",
+     "body": "@mwtoews since you have been working recently on fixing/testing such issues on the GEOS side, do you have thoughts here?"
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-20T08:27:54+00:00",
+     "body": "Is it worth reporting/fixing floating-point exceptions in GEOS? I'm still undecided, and I think both of these arguments are valid:\n\nThere are sometimes \"real improvement to the GEOS code\" and\n\"This ate my afternoon\"\n\nIdentifying and fixing these in GEOS potentially benefits other bindings too.\nBut I think these types of issues are becoming less common, as I see only a few remaining cryptic ones that are compiler and/or architecture-dependant.  Perhaps a shapely-side fix can be done on a case-by-case approach for problematic methods, like #2215."
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2527,
+   "verdict": "NOT_A_TASK",
+   "title": "Several doctest failures with GEOS 3.15.0",
+   "body": "Both Fedora 45 (now in final freeze, with a release candidate coming soon) and Fedora Rawhide have GEOS 3.15.0. In these release, when I try to update the distribution’s python-shapely package to 3.2.0, I encounter several doctest failures:\n=================================== FAILURES ===================================\n__________________ [doctest] shapely._coverage.coverage_clean __________________\n245 See Also\n246 --------\n247 coverage_is_valid, coverage_invalid_edges, coverage_simplify\n248\n249 Examples\n250 --------\n251 >>> import shapely\n252 >>> from shapely import box\n253 >>> polygons = [box(0, 0, 1, 1), box(0.9, 0, 2, 1)]\n254 >>> shapely.coverage_clean(polygons)\nExpected:\n    array([<POLYGON ((0 0, 0 1, 0.9 1, 1 1, 1 0, 0.9 0, 0 0))>,\n       <POLYGON ((1 1, 2 1, 2 0, 1 0, 1 1))>], dtype=object)\nGot:\n    array([<POLYGON ((0.9 0, 0 0, 0 1, 0.9 1, 1 1, 1 0, 0.9 0))>,\n           <POLYGON ((1 0, 1 1, 2 1, 2 0, 1 0))>], dtype=object)\n\n/builddir/build/BUILD/python-shapely-2.2.0-build/BUILDROOT/usr/lib64/python3.15/site-packages/shapely/_coverage.py:254: DocTestFailure\n__________________ [doctest] shapely.constructive.make_valid ___________________\n706     See :ref:`NumPy ufunc docs <ufuncs.kwargs>` for other keyword arguments.\n707\n708 Examples\n709 --------\n710 >>> import shapely\n711 >>> from shapely import Polygon\n712 >>> polygon = Polygon([(0, 0), (1, 1), (1, 2), (1, 1), (0, 0)])\n713 >>> shapely.is_valid(polygon)\n714 False\n715 >>> shapely.make_valid(polygon)\nExpected:\n    <MUL",
+   "labels": [],
+   "created_at": "2026-10-07T12:08:42+00:00",
+   "updated_at": "2026-10-07T13:43:26+00:00",
+   "linked_prs": 0,
+   "comment_count": 3,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-10-07T12:51:47+00:00",
+     "body": "I believe that is expected. Given the wheels of 2.2.0 contain GEOS 3.14, docstring examples are tied to this version. They will be updated once switched to 3.15. What you can see here is a change of GEOS behaviour. If you need to build against 3.15, I suggest you ignore the failures."
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-10-07T13:37:57+00:00",
+     "body": "I believe that is expected. Given the wheels of 2.2.0 contain GEOS 3.14, docstring examples are tied to this version. They will be updated once switched to 3.15. What you can see here is a change of GEOS behaviour. If you need to build against 3.15, I suggest you ignore the failures.\n\nThanks! That’s exactly what I am doing."
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-07T13:43:15+00:00",
+     "body": "Indeed, we have ensured that the unit tests are passing with GEOS 3.15, but only do that for the doctests whenever bumping the GEOS versions with which we test them (the doctests are only tested with one GEOS version, the unit tests with all supported versions)"
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2516,
+   "verdict": "NOT_A_TASK",
+   "title": "Generic transformation API (deprecation of shapely.ops.transform?)",
+   "body": "I am opening this issue to try to summarize the current state of the transform API in shapely, triggered by reviewing its docs for the upcoming shapely 2.2 release. Apologies for the long issue, I tried to keep it as short as possible while still being clear and complete ;)\nRelated previous discussions: #1668, #1676, #1902 (and open issue about better documenting both: #1897)\nContext\nWhen applying a generic function on the coordinates (i.e. not using one of the shapely.affinity transformations), there are various ways how this function can work and be called. Copying from my comment at #1668 (comment), possible \"degrees of freedom\" on how to apply the function are:\n\nHow to pass the coordinates to the function:\na. Pass them as a single argument (a single tuple, or a 2D array in case of multiple coordinates)\nb. Pass them as separate x, y(, z) arguments (single scalars, or separate 1D arrays/lists in case of multiple coordinates)\nWhich coordinates to pass to the function at once:\na. Apply the function on all coordinates of all geometries at once\nb. Apply the function once per geometry\nc. Apply the function once per coordinate sequence\nd. Apply the function once per coordinate pair\n\nHistorically, the shapely.ops.transform(func, geom) function has always used passed coordinates as separate arguments (1b) and first tried to pass coordinates as a tuple per coord sequence and if that errors, per coord pair (2c with fallback to 2d).\nThe top-level vectorized function shapely.transform(",
+   "labels": [],
+   "created_at": "2026-09-23T08:44:07+00:00",
+   "updated_at": "2026-10-02T17:22:13+00:00",
+   "linked_prs": 0,
+   "comment_count": 7,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-09-28T19:31:36+00:00",
+     "body": "@jorisvandenbossche I've never seen any user-written transform functions from before 2.0. so I don't know how complicated they would be. I suspect that supporting Pyproj transformers covers almost all of the common use cases.\nToo late for this now, but I wish the new functions had the func as their first argument. It's easier to compose functions that look like map."
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-09-29T08:59:23+00:00",
+     "body": "I did a github and stackoverflow search, and while the pyproj transformer is indeed the most common use case, I did notice a few other typical ones, as listed below.\nBut in practice, all those cases are essentially element-wise functions that will also work with shapely.transform, i.e. they don't need the \"scalar\" aspect of shapely.ops.transform to call the function per coordinate pair.\n(All those examples would benefit from a \"how to\" like section in our docs, though)\nCoordinate axis swap (lat/lon <-> lon/lat)\ndef swap_xy(x, y, z=None):\n    return tuple(filter(None, [y, x, z]))\n\nswapped_geom = shapely.ops.transform(swap_xy, geom)\n\n# or a simpler version:\nswapped_geom = shapely.ops.transform(lambda x, y: (y, x), geom)\nExamples:\n\nhttps://github.com/DahnJ/H3-Pandas/blob/4c112ca143203e2e93be1"
+    },
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-10-02T08:27:42+00:00",
+     "body": "Great to have this overview of the current usage of ops.transform. Thanks for doing this analysis @jorisvandenbossche .\nI am a bit confused on the term \"deprecation\" though. Did #1902 actually remove functionality (did I miss something there?). Or is it just the deprecation warning that I added.  I think I would like to keep the warning, as long as it is paired with a good documentation on how to move to the new transform functions that would be fine. I do like to aim for fully deprecating the ops.transform version, but then in a major release."
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-02T08:37:58+00:00",
+     "body": "I am a bit confused on the term \"deprecation\" though. Did #1902 actually remove functionality (did I miss something there?). Or is it just the deprecation warning that I added.\n\nYes, that is what \"deprecation\" typically means in my mind? (adding a warning, about that it will change/be removed in the future)\nThe thing is that that PR originally also included the fallback to scalar operation, and so was a \"full\" replacement for shapely.ops.transform. The later that fallback was removed from the PR, but the deprecation of shapely.ops.transform was not reconsidered (now, based on my search, I also did not really find much that would need this scalar fallback, and it can relatively easily be emulated as I am documenting in #2518)"
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-10-02T17:22:13+00:00",
+     "body": "I think I would like to keep the warning, as long as it is paired with a good documentation\n\nAfter creating that overview, I think I am also fine with keeping the warning. But also seeing how often it is used, if we keep the warning, I think we should start with the less noisy DeprecationWarning (to give downstream libraries some time to adapt before their users see the warning) -> #2524"
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2494,
+   "verdict": "NOT_A_TASK",
+   "title": "Shapely 2.1.2: Union of a ring of polies incorrectly closes the hole on Windows",
+   "body": "I'm developing an app that uses Shapely for 2d geometry manipulation. In particular, I'm covering some other complex geometry with tiles in an overlapping manner, and I need to be able to detect when a tile doesn't cover anything unique. The way I'm trying to do that is to union the tile's neighbors, then subtract that union from the tile. If there's nothing left after the difference, the tile is redundant and can be discarded. I've run into an annoying bug where the difference can falsely produce an empty result because the union has incorrectly filled the hole. You can find a graph of one such geometry below.\n\nI tried to reproduce this bug with simpler geometry and failed. For now I have applied a workaround, so I don't need help getting something working, I just wanted to pass the info up the chain. For reference, I am seeing this bug on Windows 11 Pro version 25H2 on an x86_64 architecture CPU using Python 3.12.13 and shapely version 2.1.2. On the same machine in a Linux install this bug does not reproduce.\nAttached are the scripts and a json of the data needed to reproduce it. The script repro_geos_union_ring_bug.py is the failed attempt to reproduce it with simplified geometry, and the script repro_geos_overlay_bug.py actually reproduces it and needs the data in the json.\nrepro_geos_overlay_bug.py\nrepro_geos_union_ring_bug.py\ngeos_bug_repro_data.json",
+   "labels": [
+    "geos",
+    "windows"
+   ],
+   "created_at": "2026-08-25T20:38:52+00:00",
+   "updated_at": "2026-10-14T20:28:17+00:00",
+   "linked_prs": 0,
+   "comment_count": 5,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-08-25T20:52:22+00:00",
+     "body": "@odysseus9672 can you show the output of the script you get on your machine? (which reproduces the bug)\nI tried running it locally (Linux / Ubuntu) with a few different GEOS versions using conda-forge packages, but all passing:\n$ pixi exec --with shapely --with geos=3.13 --with matplotlib python repro_geos_overlay_bug.py\nshapely 2.1.1  GEOS 3.13.1  platform Linux-6.1.0-1036-oem-x86_64-with-glibc2.35\ntile.area              = 19.874359\nneighbor_union.area    = 96.693681\nexpected difference    ~ 19.874359  (tile is NOT covered by its neighbours)\nactual diff.area       = 19.8743587505\nactual diff.is_empty   = False\n\nNot reproduced on this platform/GEOS build: difference is non-empty as expected.\n\n(and getting the same for any version of GEOS 3.11 to 3.14)"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-25T21:09:42+00:00",
+     "body": "As I explained, this bug doesn't reproduce on Linux, but does on Windows. Here's the output from running it on Windows.\n python .\\repro_geos_overlay_bug.py\nshapely 2.1.2  GEOS 3.13.1  platform Windows-11-10.0.26200-SP0\ntile.area              = 19.874359\nneighbor_union.area    = 122.922377\nexpected difference    ~ 19.874359  (tile is NOT covered by its neighbours)\nactual diff.area       = 0.0000000000\nactual diff.is_empty   = True\n\nBUG REPRODUCED: GEOS reports the tile as fully covered by its neighbours, which is incorrect.\n\nSaved plot grid to C:\\Users\\SeanLake\\Downloads\\geos_bug_repro.png\n\nNaturally, the output @jorisvandenbossche saw is what should have happened."
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-08-25T21:29:23+00:00",
+     "body": "As I explained, this bug doesn't reproduce on Linux, but does on Windows.\n\nYes, but I wanted to verify if the GEOS version might be related to that (since this is most likely an upstream issue in GEOS). Also on Windows it would be interesting to test with the more recent GEOS 3.14 (although with PyPI wheels that is a bit difficult, as the current wheels include GEOS 3.13)\nFor providing a reproducer upstream (https://github.com/libgeos/geos), can you reproduce the issue if you start from the WKT representation of both operands of tile.difference(neighbor_union) (to have a simpler reproducer, that can easily be reproduced without shapely)?"
+    },
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-08-25T21:33:12+00:00",
+     "body": "Like if you add the following lines right before diff = tile.difference(neighbor_union):\n    print(tile.wkt)\n    tile = shapely.from_wkt(tile.wkt)\n    print(neighbor_union.wkt)\n    neighbor_union = shapely.from_wkt(neighbor_union.wkt)"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-26T12:59:52+00:00",
+     "body": "Here's the output requested.\npython .\\repro_geos_overlay_bug.py\nGEOMETRYCOLLECTION (POLYGON ((-7.91105934142 3.18986438687, -7.91163644447 3.16420470897, -7.91163868981 3.15980987044, -7.91144641465 3.15085365872, -7.91121282904 3.14584049031, -7.91073066973 3.13912324283, -7.91073419873 3.1390597096, -7.9112800663 3.12565128482, -7.91128331044 3.11759635057, -7.91110072678 3.11302077535, -7.9110652155 3.11221286627, -7.91058120932 3.10213078202, -7.91131912265 3.08951897363, -7.91132235854 3.08086508718, -7.91199142389 3.07101411601, -7.9119941711 3.05750216514, -7.91164110241 3.05227230982, -7.91119908086 3.04745907458, -7.91073621266 3.0434780027, -7.9116475816 3.03265121381, -7.91199999764 3.0242848715, -7.9116512149 3.01591837694, -7.91121047868 3.01065521904, -7.9110629828 3.00904962"
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2482,
+   "verdict": "FREE",
+   "title": "`buffer()` with an almost-zero distance removes polygon holes",
+   "body": "Calling Polygon.buffer() with an extremely small non-zero distance removes a valid interior ring. The distance (1e-17) is many orders of magnitude too small to close the hole geometrically.\nReproducible example\nimport shapely\nfrom shapely.geometry import Polygon\n\npolygon = Polygon(\n    shell=[(0, 0), (10, 0), (10, 10), (0, 10)],\n    holes=[[(2, 2), (8, 2), (8, 8), (2, 8)]],\n)\n\nbuffered = polygon.buffer(1e-17, cap_style='flat', join_style='mitre')\n\nprint(polygon.wkt)\nprint(buffered.wkt)\nActual behavior\nThe original WKT contains the interior ring, but the WKT produced by buffered does not: the hole is removed.\nPOLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 8 2, 8 8, 2 8, 2 2))\nPOLYGON ((-1e-17 -1e-17, -1e-17 10, 10 10, 10 -1e-17, -1e-17 -1e-17))\n\nExpected behavior\nA buffer distance of 1e-17 should preserve this hole. A positive buffer may shrink holes, but this distance is far too small relative to the geometry dimensions to eliminate a 6-by-6 hole.\nEnvironment\n\nOperating system: Windows-10-10.0.26200-SP0\nPython: 3.11.1\nShapely: 2.1.1\nGEOS: 3.13.1",
+   "labels": [],
+   "created_at": "2026-07-29T08:22:04+00:00",
+   "updated_at": "2026-07-29T08:22:04+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2458,
+   "verdict": "TAKEN",
+   "title": "Documentation: clarify that hausdorff_distance measures vertex-to-polyline distance not polyline-to-polyline distance",
+   "body": "The documentation for hausdorff_distance states that it computes:\n\n\"the furthest distance that a point on either geometry can be from the nearest point to it on the other geometry.\"\n\nIn practice, the implementation computes the furthest distance that a vertex on either geometry can be from the nearest point to it on the other geometry. That is, if measuring the distance from polyline A to polyline B and the vertices of these polylines are denoted $v_A$ and $v_B$, the documentation suggests that the value computed is:\n\n$$H_{A \\to B}$$\n\nwhen what is actually computed is:\n\n$$H_{v_A \\to B}$$\n\nThese values differ when the maximum distance occurs at a point along a segment rather than at a vertex.\nHere is an illustration of a situation in which the values are not equal to each other:\n\nTo reproduce the behavior, the polylines used in the figure are:\nA = [(26, 8), (13, -2), (13, 19), (10, 19), (10, 23), (1, 17)]\nB = [(15, 1), (28, 11), (13, 26), (1, 18)]\n\nA minimum example:\nfrom shapely.geometry import LineString\n\nA = LineString([(26, 8), (13, -2), (13, 19), (10, 19), (10, 23), (1, 17)])\nB = LineString([(15, 1), (28, 11), (13, 26), (1, 18)])\n\nprint(A.hausdorff_distance(B))\n\n\nThe true Polyline Hausdorff distance is 9.918.\nThis is the distance from:\n(13.0, 11.974135047432018)\n\nto either of:\n (20.01293247628399, 18.98706752371601)\n (19.046979762699486, 4.113061355922682)]\n\nThe results of the shapely hausdorff_distance function is 4.949747468305833.\nThis is the distance from:\n(13, 19)\nto",
+   "labels": [],
+   "created_at": "2026-06-24T04:19:50+00:00",
+   "updated_at": "2026-10-08T13:58:33+00:00",
+   "linked_prs": 1,
+   "comment_count": 3,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-09-14T07:50:47+00:00",
+     "body": "@geobarry thanks for the report! You are entirely correct that the function by default only considers the vertices, and so it is a (potentially crude) approximation of the actual Hausdorff distance.\nBut, the function actually has a densify argument to on-the-fly densify the input lines with more vertices, to get a more accurate result (see https://shapely.readthedocs.io/en/latest/reference/shapely.hausdorff_distance.html, although I also notice that we should explain better what the value passed to densify means). With your example data:\n>>> import shapely\n>>> shapely.hausdorff_distance(A, B)\n4.949747468305833\n>>> shapely.hausdorff_distance(A, B, densify=0.01)\n9.849997461928607\n>>> shapely.hausdorff_distance(A, B, densify=0.001)\n9.910543562231325\n>>> shapely.hausdorff_distance(A, B, densif"
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-10-08T13:13:28+00:00",
+     "body": "Also, a true Hausdorff function was recently implemented in JTS / GEOS that provides the result you're looking for:\n% geosop -a \"LINESTRING (26 8, 13 -2, 13 19, 10 19, 10 23, 1 17)\" -b \"LINESTRING (15 1, 28 11, 13 26, 1 18)\" symmetricHausdorffDistance\n9.9172893806542231\n\nMore information at http://lin-ear-th-inking.blogspot.com/2026/03/fast-hausdorff-distance-and.html"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-08T13:58:33+00:00",
+     "body": "@dbaston The JTS/GEOS function uses lazy densification, which is still an approximation although it looks like the approximation can be made to be arbitrarily accurate without increasing computation time very much. That seems like an intelligent approach that may be the most practical option for a generic library where the geometric relationship between the inputs is unknown. But for a true polyline-to-polyline Hausdorff function that doesn't rely on vertex densification at all, see:\nhttps://github.com/geobarry/Polyline_Hausdorff_and_Average_Distance\nThe implementation uses integral calculus so it is exact within the limits of floating-point precision. As a bonus, the average directed distance from one polyline to the other is computed simultaneously.\nThe code runs pretty quickly (loglinea"
+    }
+   ]
+  },
+  {
+   "repo": "shapely/shapely",
+   "number": 2441,
+   "verdict": "NOT_A_TASK",
+   "title": "Arguments of `box` factory functions are inconsistent",
+   "body": "Preface: Changing this would require a breaking change, and I don't think that'll be done until there are other reasons to make breaking changes, so this isn't an argument for that.\nI don't like positional arguments! I always try to write code with keyword arguments unless the positional argument is clearly described by the function name, like handle_shape(shape).\nFor Shapely bounding boxes using the box factory functions, this isn't the case. There are multiple ways to specify bbox verticies, so it really sucks to read box(-122.5, 37.7, -122.3, 37.9). You can do box(xmin=-122.5, ymin=37.7, xmax=-122.3, ymax=37.9), but that's only if you import from shapely box! If you import from shapely.geometry box then you have to change xmin to minx etc: shapely.box(minx=-122.5, miny=37.7, maxx=-122.3, maxy=37.9). Remembering which one is which is confusing :)\n>>> b1 = shapely.geometry.box(xmin=-122.5, ymin=37.7, xmax=-122.3, ymax=37.9)\nTraceback (most recent call last):\n  File \"<python-input-33>\", line 1, in <module>\n    b1 = shapely.geometry.box(xmin=-122.5, ymin=37.7, xmax=-122.3, ymax=37.9)\nTypeError: box() got an unexpected keyword argument 'xmin'\n>>> b1 = shapely.geometry.box(minx=-122.5, miny=37.7, maxx=-122.3, maxy=37.9)\n>>> b2 = shapely.box(minx=-122.5, miny=37.7, maxx=-122.3, maxy=37.9)\nTraceback (most recent call last):\n  File \"<python-input-35>\", line 1, in <module>\n    b2 = shapely.box(minx=-122.5, miny=37.7, maxx=-122.3, maxy=37.9)\n  File \"/home/robatt/.cache/uv/archive-v0/",
+   "labels": [],
+   "created_at": "2026-05-10T18:55:00+00:00",
+   "updated_at": "2026-10-16T00:28:18+00:00",
+   "linked_prs": 0,
+   "comment_count": 3,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "MEMBER",
+     "at": "2026-05-11T08:39:53+00:00",
+     "body": "That is indeed an unfortunate inconsistency that crept in with the shapely 2.0 refactor (merging pygeos, although I don't remember if this other name was chosen on purpose in pygeos at the time).\nNow, I would say this can easily be solved though: always use shapely.box instead of mixing shapely.box and shapely.geometry.box. Or is there a reason you would deliberately use both?\n(I understand that shapely.geometry.box will be present a lot in existing code by being the older function)\nWe could potentially also add xmin et al as aliases (additional keyword-only parameters) to shapely.geometry.box such that you can use both in a consistent way. But at that point, if someone is editing their code the change the params of a shapely.geometry.box call, they could also update the code to use shapel"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-05-11T14:58:55+00:00",
+     "body": "Now, I would say this can easily be solved though: always use shapely.box instead of mixing shapely.box and shapely.geometry.box. Or is there a reason you would deliberately use both?\n(I understand that shapely.geometry.box will be present a lot in existing code by being the older function)\n\nNo reason to prefer the older one, but I could see this being a struggle due to old habits and leading to lots of inconsistent code across the ecosystem.\n\nWe could potentially also add xmin et al as aliases (additional keyword-only parameters) to shapely.geometry.box such that you can use both in a consistent way. But at that point, if someone is editing their code the change the params of a shapely.geometry.box call, they could also update the code to use shapely.box instead?\n\nI like this idea. This o"
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-10-16T00:28:17+00:00",
+     "body": "It's unfortunate that we have duplicate functions. We should have caught this long ago, but did not. I don't think making shapely.geometry.box() accept two different forms of arguments helps at all. Let's accept and document the inconsistency, and deprecate one or the other (the legacy one, since we're all agreed that exporting from shapely instead of shapely.geometry is better)."
+    }
+   ]
+  },
+  {
+   "repo": "jazzband/django-silk",
+   "number": 877,
+   "verdict": "FREE",
+   "title": "[Feature Request] Limit requests by day",
+   "body": "Having logs for multiple days would be useful to track patterns over a longer period.\nSo an option like SILKY_MAX_RECORDED_TIME = 60 * 24 * 7 # minutes would be an useful addition",
+   "labels": [],
+   "created_at": "2026-05-26T13:14:21+00:00",
+   "updated_at": "2026-05-26T13:14:21+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "emissary-ingress/emissary",
+   "number": 6024,
+   "verdict": "FREE",
+   "title": "Allow a Mapping to add headers to the request sent to an HTTP AuthService",
+   "body": "Please describe your use case / problem.\nAn AuthService applies to every Mapping in the cluster, so it's often useful to provide per-Mapping context to the service.\nEmissary already supports this for gRPC auth services through Mapping.auth_context_extensions, which becomes check_settings.context_extensions on the route.\nThis is limited to gRPC as Envoy only sends context_extensions in a gRPC CheckRequest.\nFor HTTP auth services there is no per-Mapping option:\n\nMapping.add_request_headers becomes the route's request_headers_to_add, which Envoy's router applies after the ext_authz filter has run, so the auth service never sees those headers.\nAuthService.add_auth_headers becomes authorization_request.headers_to_add on the listener-level filter, so it applies to every route.\nMapping.auth_context_extensions is written into the config, but Envoy ignores it for an http_service.\n\nDescribe the solution you'd like\nAdd add_auth_headers to Mapping resources, with the same meaning as on an AuthService. These are added to the request Emissary sends to the auth service when checking requests that match the Mapping.\napiVersion: getambassador.io/v3alpha1\nkind: Mapping\nmetadata:\n  name: quote-backend\nspec:\n  prefix: /backend/\n  service: quote\n  add_auth_headers:\n    x-tenant: team-a\nEnvoy 1.36 added a per-route override of the whole authorization service, ExtAuthzPerRoute.check_settings.http_service (and grpc_service).\nAs Envoy still has no per-route option for adding headers on their own, Emi",
+   "labels": [],
+   "created_at": "2026-10-20T10:52:45+00:00",
+   "updated_at": "2026-10-20T10:52:45+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "emissary-ingress/emissary",
+   "number": 6006,
+   "verdict": "NOT_A_TASK",
+   "title": "Optional AgentCert / agent-trust verification via ext_authz?",
+   "body": "emissary is Envoy-based, so this would ride the ext_authz path — which means no code in emissary itself.\nthe external authz service verifies the agent's AgentCert (sig + revocation) + a live TrustScore and returns allow / deny. we ship it exactly that way: an MIT ext_authz endpoint (ghcr.io/pdxlab/agentcert-tag/sidecar). ~19.7K agents already carry a public TrustScore.\nopt-in per route, off by default, shadow-mode first (logs, blocks nothing), metadata only.\nis agent-trust verification via ext_authz something you'd document/support as an integration? glad to contribute a reference config. https://trustmodel.ai/verify",
+   "labels": [],
+   "created_at": "2026-10-05T12:21:54+00:00",
+   "updated_at": "2026-10-05T12:21:54+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "emissary-ingress/emissary",
+   "number": 5967,
+   "verdict": "TAKEN",
+   "title": "State of Host resource is empty",
+   "body": "Describe the bug\nWhen we deploy a v4.0.1 on kubernetes 1.35.5, and create Host resource. The status field of the host is always empty.\nTo Reproduce\n\nCreate a new k8s cluster using kind, minikube, EKS, GKE etc.\nDeploy emissary-ingress v4.0.1\n\nhelm install emissary-crds \\\n --namespace emissary-system --create-namespace \\\n oci://ghcr.io/emissary-ingress/emissary-crds-chart --version=4.0.1 \\\n --set enableLegacyVersions=true \\\n --set enableV1=true \\\n --wait\n\nhelm install emissary \\\n --namespace emissary --create-namespace \\\n oci://ghcr.io/emissary-ingress/emissary-ingress --version=4.0.1 \\\n --set waitForApiext.enabled=true \\\n--set createDefaultListeners=true \\\n --wait\n\n\nCreate minimal host from https://emissary-ingress.dev/docs/4.0/topics/running/host-crd/\nDo kubectl get host minimal-host -w\n\nNAME           HOSTNAME           STATE   PHASE COMPLETED   PHASE PENDING   AGE\nminimal-host   host.example.com                                             6m\n\nExpected behavior\nYou should see STATE Ready or any other Initial etc as mentioned in the API.\nVersions (please complete the following information):\n\nemissary ingress: 4.0.1\nKubernetes environment: kind, EKS, GKE\nVersion 1.35.5\n\nAdditional context\nI have to use enableLegacyVersions because some of my deployments use those",
+   "labels": [
+    "t:bug"
+   ],
+   "created_at": "2026-07-11T17:21:29+00:00",
+   "updated_at": "2026-09-30T02:39:51+00:00",
+   "linked_prs": 1,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-09-30T02:39:50+00:00",
+     "body": "Hi maintainer, can you please confirm whether this still needs to be fixed ? If so, I'd be happy to pick it up and open a PR. Thanks!"
+    }
+   ]
+  },
+  {
+   "repo": "emissary-ingress/emissary",
+   "number": 5946,
+   "verdict": "TAKEN",
+   "title": "v4 releases keep /v3 module path",
+   "body": "Summary\nThe v4.x.x releases are tagged on a module whose path still ends in /v3:\n// go.mod\nmodule github.com/emissary-ingress/emissary/v3\n\nPer Go's module version numbering rules, any module at major version ≥ 2 must have a matching /vN suffix in its module path. A v4.x.x tag on a /v3 module path is invalid, so Go tooling cannot resolve these releases.\nReproduction\n$ go get github.com/emissary-ingress/emissary/v3@v4.1.0\ngo: github.com/emissary-ingress/emissary/v3@v4.1.0: invalid version: module contains a go.mod file, so module path must match major version (\"github.com/emissary-ingress/emissary/v4\")\nThere is no path that resolves the v4 tags:\n\n.../emissary/v3@v4.1.0 → rejected (major mismatch, as above)\n.../emissary/v4@v4.1.0 → 404, no such module path published\n\nResult: consumers are stuck on v3.x.x and cannot import any code from a v4 release.\nImpact\nEmissary is imported as a library by downstream projects — e.g. external-dns depends on pkg/api/getambassador for the Mapping/Host CRD types (kubernetes-sigs/external-dns#6482). These consumers cannot upgrade to v4.",
+   "labels": [
+    "t:bug"
+   ],
+   "created_at": "2026-06-10T22:34:06+00:00",
+   "updated_at": "2026-09-30T02:39:06+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-09-30T02:39:06+00:00",
+     "body": "Hi maintainer, can you please confirm whether this still needs to be fixed ? If so, I'd be happy to pick it up and open a PR. Thanks!"
+    }
+   ]
+  },
+  {
+   "repo": "emissary-ingress/emissary",
+   "number": 5944,
+   "verdict": "TAKEN",
+   "title": "Document maximally restricted securityContext",
+   "body": "To meet restricted-level pod security standards on os=linux, each container needs the equivalent of the following, some of which can be declared in the pod-level security context:\n        securityContext:\n          allowPrivilegeEscalation: false\n          capabilities:\n            drop:\n            - ALL\n          readOnlyRootFilesystem: true\n          runAsNonRoot: true\n          seccompProfile:\n            type: RuntimeDefault\nWhy are only two of these included (commented-out) in values?\n\n  \n    \n      emissary/charts/emissary-ingress/values.yaml\n    \n    \n        Lines 109 to 117\n      in\n      0c18624\n    \n  \n  \n    \n\n        \n          \n           security: \n        \n\n        \n          \n             # Security Context for all containers in the pod. \n        \n\n        \n          \n             # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#podsecuritycontext-v1-core \n        \n\n        \n          \n             podSecurityContext:  # +doc-gen:break \n        \n\n        \n          \n               runAsUser: 8888 \n        \n\n        \n          \n             # Security Context for the Ambassador container specifically \n        \n\n        \n          \n             # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#securitycontext-v1-core \n        \n\n        \n          \n             containerSecurityContext:  # +doc-gen:break \n        \n\n        \n          \n               allowPrivilegeEscalation: false \n        \n    \n  \n\n\nCan a maximally-re",
+   "labels": [
+    "t:feature"
+   ],
+   "created_at": "2026-06-03T04:53:57+00:00",
+   "updated_at": "2026-09-30T09:21:52+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-09-30T02:35:39+00:00",
+     "body": "Hi maintainers, is this still something you'd like addressed? I'd be happy to help with a PR to document a restricted securityContext example."
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-09-30T09:21:52+00:00",
+     "body": "I would still like to see a maximally restricted example that works."
+    }
+   ]
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 544,
+   "verdict": "FREE",
+   "title": "Tests fail with Click 8.2 due to removed mix_stderr argument",
+   "body": "tests/test_krr.py and tests/test_runner.py create CliRunner(mix_stderr=False).\nClick 8.2 removed the mix_stderr parameter, so pytest fails during collection with:\nTypeError: CliRunner.__init__() got an unexpected keyword argument 'mix_stderr'\n\nReplacing those calls with CliRunner() restores test collection with current Click.",
+   "labels": [],
+   "created_at": "2026-07-24T06:14:39+00:00",
+   "updated_at": "2026-07-24T06:14:39+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 542,
+   "verdict": "FREE",
+   "title": "Build Pipeline fails with macOS 13",
+   "body": "Describe the bug\nThe build pipeline fails, because it depends on deprecated macOS 13 runners.\nThis also leads to the home-brew formula not being updated, because that step is never reached.\nTo Reproduce\nSteps to reproduce the behavior:\nSee https://github.com/robusta-dev/krr/actions/runs/29809991428, especially https://github.com/robusta-dev/krr/actions/runs/29809991428/job/88568652630\nExpected behavior\nJobs are updated to supported runners.\nAre you interested in contributing a fix for this?\nYes",
+   "labels": [],
+   "created_at": "2026-07-21T15:02:19+00:00",
+   "updated_at": "2026-07-21T15:02:19+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 538,
+   "verdict": "FREE",
+   "title": "Support bare pods, e.g. to support CloudnativePG resources",
+   "body": "Is your feature request related to a problem? Please describe.\nI'd like to be able to use krr to size CloudNativePG cluster, which does not work as it manage pods directly (without any StatefulSet, DaemonSet or Job).\nDescribe the solution you'd like\nI think expecting KRR to support every operator that does this is maybe not reasonable.\nI wonder if KRR could not be adapted to support a set of pods, maybe grouping them using ownerReferences.\nDescribe alternatives you've considered\nAdding support for CloudNativePG cluster explicitly, as done for Strimzi and Rollout.\nAre you interested in contributing a PR for this?\nFor the generic solution, I'm not sure, it depends on the amount of work needed, which I'm not sure to be able to estimate yet since I'm not familiar with KRR codebase. If you prefer the explicit solution, I think from what I see for Strimzi implementation I could do it.\nAdditional context\nCloudNativePG documentation: https://cloudnative-pg.io/docs/1.30/",
+   "labels": [],
+   "created_at": "2026-07-10T10:52:26+00:00",
+   "updated_at": "2026-07-10T10:53:09+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 536,
+   "verdict": "NOT_A_TASK",
+   "title": "New release",
+   "body": "Could you please release a new version? Thank you very much!",
+   "labels": [],
+   "created_at": "2026-07-05T15:40:28+00:00",
+   "updated_at": "2026-07-05T15:40:28+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 526,
+   "verdict": "FREE",
+   "title": "Add OpenObserve-compatible Prometheus query mode for KRR resource recommendations",
+   "body": "I’m trying to run KRR against OpenObserve’s Prometheus-compatible API to generate Kubernetes resource recommendations from metrics already ingested into OpenObserve.\nExample endpoint shape:\nkrr simple \\\n  --context dev1 \\\n  --namespace krr-demo \\\n  --prometheus-url https://openobserve.example.com/api/dev1/prometheus \\\n  --prometheus-auth-header \"Basic <redacted>\"\n\nAuthentication works: KRR connects successfully to the OpenObserve Prometheus API.\nThe scan then fails because KRR’s default Prometheus metric loaders use PromQL subqueries such as:\nquantile_over_time(\n  0.95,\n  max(rate(container_cpu_usage_seconds_total{...}[75s])) by (container, pod, job)\n  [14d:75s]\n)\n\nmax_over_time(\n  max(container_memory_working_set_bytes{...}) by (container, pod, job)\n  [14d:75s]\n)\n\ncount_over_time(\n  max(container_cpu_usage_seconds_total{...}) by (container, pod, job)\n  [14d:75s]\n)\n\nOpenObserve rejects these with HTTP 400:\nThis feature is not implemented: Unsupported subquery, the return value should have been a matrix but got \"scalar\"\n\nThis means KRR can connect to OpenObserve, but cannot currently calculate recommendations with the default strategy.\nProposed approach:\nAdd an explicit provider option, for example:\n--prometheus-provider openobserve\n\nFor this provider, KRR could avoid PromQL subqueries by querying simpler range expressions and doing the final aggregation locally:\n\nCPU percentile: query max(rate(container_cpu_usage_seconds_total{...}[step])) by (...) via query_range, then calcu",
+   "labels": [],
+   "created_at": "2026-06-03T18:55:58+00:00",
+   "updated_at": "2026-06-03T18:57:11+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "robusta-dev/krr",
+   "number": 522,
+   "verdict": "TAKEN",
+   "title": "AWS Managed Prometheus (AMP) rejects instant queries with >31d lookback range",
+   "body": "When using --eks-managed-prom with --history_duration greater than ~720h (30 days), KRR fails with:\nHTTP Status Code 422: \"queries with long day range (32d to 95d) are currently\nonly supported for range type queries\"\nRoot cause:\nIn prometheus_metrics_service.py, pod owner lookup queries are capped at 32 days:\ndays_literal = min(int(period.total_seconds()) // 3600 // 24, 32)\nperiod_literal = f\"{days_literal}d\"\nThis generates an instant query like kube_replicaset_owner{...}[32d]. AMP does not support instant queries with a lookback ≥ 32 days. However, AMP does support query_range for periods up to 95 days.\nExpected behavior:\nKRR should use query_range endpoint (range query) for long history lookups instead of instant queries, similar to how CPULoader explicitly sets query_type: QueryType.QueryRange.\nSuggested fix:\nUse QueryType.QueryRange for the pod owner lookup, or split the query into smaller chunks.\nEnvironment:\nKRR v1.28.0\nAWS Managed Prometheus (AMP)\n--history_duration 960 (40 days)",
+   "labels": [],
+   "created_at": "2026-05-15T09:11:44+00:00",
+   "updated_at": "2026-05-15T09:11:44+00:00",
+   "linked_prs": 1,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2578,
+   "verdict": "FREE",
+   "title": "1.6.x: agents with legacy ids containing “-” are excluded from NATS and can’t connect",
+   "body": "Server Info:\n\nOS: Debian 12 (bookworm)\nBrowser: N/A (server-side issue)\nRMM Version (as shown in top left of web UI): v1.6.1 (updated from 1.5.1)\n\nInstallation Method:\nStandard\nAgent Info:\n\nAgent version (as shown in the ‘Summary’ tab of the agent from web UI): 2.11.0\nAgent OS: Windows 10, Windows 11, Windows Server 2012 R2 / 2016 / 2019\n\nDescribe the bug\nAfter updating to 1.6.1, agents whose agent_id contains a hyphen can no longer connect. These are agents installed with older agent versions, with ids like <40 letters>-.\nThe agent service keeps running, but agent.log loops on NATS error: EOF, and the server’s nats log shows:\nauthentication error - User \"<40 letters>-\"\nThe agents show as overdue and can’t be managed.\nCause: 1.6.x added is_valid_agent_id() in api/tacticalrmm/tacticalrmm/utils.py (_VALID_AGENT_ID = re.compile(r\"[A-Za-z0-9]+\")), and reload_nats() now skips any agent that fails it. Those agents are left out of nats-rmm.conf. As far as I can tell, this came in with commit eca3241 and isn’t mentioned in the release notes.\nTo Reproduce\nSteps to reproduce the behavior:\n\nHave an agent whose agent_id contains “-” (installed with an older agent version).\nUpdate the server to 1.6.0 / 1.6.1 (update.sh runs reload_nats).\nCheck nats-rmm.conf: the agent is missing from accounts.AGENTS.users.\nSee error: the agent goes overdue, and the nats log shows “authentication error” for its id.\n\nExpected behavior\nAgents with legacy ids keep connecting after the update. Or the update wa",
+   "labels": [],
+   "created_at": "2026-10-29T23:58:26+00:00",
+   "updated_at": "2026-10-29T23:58:26+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2577,
+   "verdict": "FREE",
+   "title": "Native File Browser does not list drives — only C:\\ is accessible without typing the path (regression from MeshCentral browser)",
+   "body": "Server Info (please complete the following information):\n\nOS: [Debian 12]\nBrowser: [2chrome, safari]\nRMM Version (1.6.1):\n\nInstallation Method:\n\n[ x ] Standard\n\nAgent Info (please complete the following information):\n\nAgent version ( 2.12.0 ):\nAgent OS: [WINDOIWS 10/11 - SERVER]\n\nDescribe the bug\nThe native File Browser introduced in v1.6.0 only shows C:. Other drives on the machine (secondary HDDs, external USB drives) are not listed anywhere in the UI. Clicking the root of the breadcrumb does not show a drive list. The only way to access another drive is to type its letter manually in the path bar (e.g. D:) and press Enter.\nThis is a regression: the legacy MeshCentral file browser showed a root level listing all available drives.\nTo Reproduce\nRight-click an agent with more than one drive > Remote Background > File Browser\nClick the drive/root icon in the breadcrumb or navigate up from C:\nOnly C:\\ is shown. Other drives are not listed.\nExpected behavior\nA root level listing all available volumes (drive letter, label, ideally free/total space), as the previous MeshCentral-based file browser did.\nWorkaround\nTyping the drive letter manually in the path bar works, which shows the agent can access the drives. They are just not listed.",
+   "labels": [],
+   "created_at": "2026-10-29T14:55:51+00:00",
+   "updated_at": "2026-10-29T14:55:51+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2576,
+   "verdict": "FREE",
+   "title": "Feature Request: Request user consent and transparency before accessing File Manager (LGPD / Privacy Compliance)",
+   "body": "Description\nFirst of all, thank you for implementing the native File Manager! This was a highly anticipated feature, and it works wonderfully.\nHowever, looking through the current documentation, there is no mention of user authorization or privacy controls for this tool. Here in Brazil, we operate under a strict privacy legislation called LGPD (Lei Geral de Proteção de Dados). This law mandates that any remote access to system files or user data must be explicitly authorized by the end-user beforehand.\nCurrently, opening the File Manager grants immediate, silent access to the remote file system. To ensure that MSPs using TacticalRMM can remain legally compliant while using this amazing new feature, I would like to suggest the following improvement based on two legal pillars of our legislation:\n• Consent and Authorization: Data access must only occur with the explicit and specific authorization of the user. The end-user must intentionally allow the action via a localized prompt.\n• Transparency and Real-Time Monitoring: Technicians must inform exactly what they are doing, and the end-user has the legal right to know and visually monitor that a system connection is taking place in real time.\nA prompt and notification system similar to how MeshCentral handles user authorization would solve this compliance issue perfectly.\nProposed Solution\n\nConsent & Authorization Prompt: When a technician attempts to open the File Manager, a modal/popup must appear on the remote end-user's scree",
+   "labels": [],
+   "created_at": "2026-10-27T11:26:48+00:00",
+   "updated_at": "2026-10-29T17:25:17+00:00",
+   "linked_prs": 0,
+   "comment_count": 3,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-28T13:04:59+00:00",
+     "body": "I find their file manager still incomplete, its still missing basic functions of copy/paste/move files etc. For now I'm keeping Meshcentral legacy file manager active at least until they reach same functionalities."
+    },
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-10-29T17:22:06+00:00",
+     "body": "we operate under a strict privacy legislation called LGPD (Lei Geral de Proteção de Dados). This law mandates that any remote access to system files or user data must be explicitly authorized by the end-user beforehand\n\nAI assessement said this, is it wrong?\nNothing in the LGPD (Lei 13.709/2018) says that remote access to a computer must show the user a visual indicator, banner, or notification. The law regulates processing of personal data. It never addresses endpoint access mechanics, screen sharing, or technician sessions.\n\nWhat people usually point to when they make this claim:\n\n- Art. 6, VI (transparency principle) requires that data subjects get clear, accessible information about processing. That is satisfied by privacy notices and policies, not by an on-screen connection indicator."
+    },
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-10-29T17:25:17+00:00",
+     "body": "I'm sure the feature will still be added, but just wondering.\nAlso I would say you're: not unauthorized being the contracted vendor, I'll assume you're not employee monitoring just doing a requested task or maintenance process."
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2574,
+   "verdict": "FREE",
+   "title": "Duplicate overdue/alert emails: full alert.save() after failure action wipes email_sent",
+   "body": "Server Info (please complete the following information):\n\nOS: Debian 12 (bookworm)\nBrowser: n/a (server-side bug)\nRMM Version (as shown in top left of web UI): 1.5.2 (code is the same on develop, 1.5.3-dev)\n\nInstallation Method:\n\n Standard\n Standard with --insecure flag at install\n Docker\n\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI): 2.11.0\nAgent OS: Windows Server 2012 R2 (any agent is affected)\n\nDescribe the bug\nWhen an alert template has a failure action (script) and \"always email\" for agent availability, an overdue agent sometimes gets two \"data overdue\" emails for the same alert, about 150 seconds apart.\nThe cause is a race in Alert.handle_alert_failure (alerts/models.py). The method queues email_task.delay(...), then runs the failure action synchronously and finishes with a full alert.save():\n\n  \n    \n      tacticalrmm/api/tacticalrmm/alerts/models.py\n    \n    \n        Lines 564 to 571\n      in\n      4a6284e\n    \n  \n  \n    \n\n        \n          \n           # command was successful \n        \n\n        \n          \n           if isinstance(r, dict): \n        \n\n        \n          \n               alert.action_retcode = r[\"retcode\"] \n        \n\n        \n          \n               alert.action_stdout = r[\"stdout\"] \n        \n\n        \n          \n               alert.action_stderr = r[\"stderr\"] \n        \n\n        \n          \n               alert.action_execution_time = \"{:.4f}\".format(r[\"execution_ti",
+   "labels": [],
+   "created_at": "2026-10-26T17:59:41+00:00",
+   "updated_at": "2026-10-26T17:59:41+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2573,
+   "verdict": "FREE",
+   "title": "A \"Run Once\" automated task executed ~3 months after its scheduled run time.",
+   "body": "Server Info (please complete the following information):\n\nOS: Ubuntu 22.04.5 LTS\nBrowser: Chrome / Edge\nRMM Version v1.5.2\n\nInstallation Method:\n\n Standard\n Standard with --insecure flag at install\n Docker\n\nAgent Info (please complete the following information):\n\nAgent v2.11.0\nAgent OS: Windows Server 2022 Standard, 64 bit v21H2 (build 20348.5761)\nAgent timezone: Europe/Brussels\n\nDescribe the bug\nA \"Run Once\" automated task executed ~3 months after its scheduled run time.\n\nTask: Example, type Run Once, start time 07/24/2026 01:15 AM, no expiry date, \"Delete task if not scheduled\" unchecked.\nThe task ran as scheduled in July, but ran again on Oct-25-2026 04:20 (see \"Last Run Time\" in the screenshot). It was not scheduled for that moment.\nNote: Oct 25, 2026 was the DST change in Europe (03:00 → 02:00). This may or may not be related.\n\nLooking at the code, I believe the root cause is the combination of:\n\nAutomatedTask.generate_nats_task_payload() (api/tacticalrmm/autotasks/models.py) forces start_when_available = True for RUN_ONCE tasks, regardless of the \"Run task ASAP after a scheduled start is missed\" checkbox:\n\"start_when_available\": (\n    False if self.task_type == TaskType.MANUAL\n    else (True if self.task_type == TaskType.RUN_ONCE else self.run_asap_after_missed)\n),\n\nWithout an expire date, the agent (rmmagent/agent/tasks_windows.go, CreateSchedTask) registers the Windows task with no EndBoundary and no DeleteExpiredTaskAfter. So the run-once task stays in Windows Task S",
+   "labels": [],
+   "created_at": "2026-10-26T08:49:18+00:00",
+   "updated_at": "2026-10-26T15:25:19+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-10-26T15:25:19+00:00",
+     "body": "I've been having the same issues as well. I get by with just making the task its own Check."
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2569,
+   "verdict": "FREE",
+   "title": "Mesh Agent Node ID conflict",
+   "body": "Server Info (please complete the following information):\n\nOS: Ubuntu 24.04.4 LTS\nBrowser: All\nRMM Version (as shown in top left of web UI): 1.5.2\n\nInstallation Method:\n\n Standard\n Standard with --insecure flag at install\n Docker\n\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI): 2.11.0\nAgent OS: Windows 11 Pro v25H2 (build 26200.9457)\n\nDescribe the bug\nA clear and concise description of what the bug is.\nOur RMM, or MeshCentral is having issues. Basically, some clients are not updating its Node ID from Mesh Central into RMM's database. So when trying to \"Take Control\" via RMM's interface, it will not connect because it's looking for the wrong Node ID inside of Mesh Central. If I log into Mesh Central, I will see there is multiple instances of that specified computer that is having issues, and only 1 instance will be online.\nThe RMM client works fine for \"Remote Background\" to run terminal, etc.\nTo Reproduce\nSteps to reproduce the behavior:\n\nLog into RMM, try to Take control of an affected computer\nWill not work, log into Mesh Central, will work.\n\nExpected behavior\nA clear and concise description of what you expected to happen.\nI expect the software to be linking properly and allow me to remote from RMM, so I do not have to use Mesh Central directly.\nScreenshots\nIf applicable, add screenshots to help explain your problem.\nSS of RMM not working:\n\nSS of Mesh Central working on 1 instance of the compute",
+   "labels": [],
+   "created_at": "2026-10-23T15:24:25+00:00",
+   "updated_at": "2026-10-23T15:24:25+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2568,
+   "verdict": "FREE",
+   "title": "v2.11.0 standard install: NATS binds 127.0.0.1:4222, agents cannot connect; install also fails permission on agents_agent",
+   "body": "Server Info (please complete the following information):\n\nOS: [e.g. Ubuntu 20.04, Debian 10]\nBrowser: [e.g. chrome, safari]\nRMM Version (as shown in top left of web UI):\n\nInstallation Method:\n\n[yes ] Standard\n Standard with --insecure flag at install\n Docker\n\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI):\nAgent OS: [e.g. Win 10 v2004, Server 2016]\n\nDescribe the bug\nA clear and concise description of what the bug is.\nTo Reproduce\nSteps to reproduce the behavior:\n\nGo to '...'\nClick on '....'\nScroll down to '....'\nSee error\n\nExpected behavior\nA clear and concise description of what you expected to happen.\nScreenshots\nIf applicable, add screenshots to help explain your problem.\nAdditional context\nAdd any other context about the problem here.\nTRMM_VERSION = 1.5.2.txt\nVersion: Tactical RMM v2.11.0 (web v0.101.64)\nOS: Ubuntu 22.04.5 LTS, fresh VM, standard (non-Docker) install\nInstall flags: --use-own-cert (self-signed cert covering rmm/api/mesh.)\nProblems:\n\nInstall ends with \"permission denied for table agents_agent\" during reload_nats.\nTables were owned by a different generated role than the one in local_settings.py.\nCoreSettings row was not created, so /_allauth/browser/v1/config/ returns 500\nuntil a row is created manually.\nnats-rmm.conf binds host 127.0.0.1 (standard, non-Docker path). A Windows agent on\nthe LAN gets connection refused on 4222.\n\nQuestion: what is the supported way for LAN agents t",
+   "labels": [],
+   "created_at": "2026-10-23T10:13:08+00:00",
+   "updated_at": "2026-10-23T10:14:14+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2566,
+   "verdict": "FREE",
+   "title": "Feature request: allow non-admin users to manage their own API keys",
+   "body": "Is your feature request related to a problem? Please describe.\nToday API keys can only be handled through \"Manage API keys\", and that permission covers every key:\n\non create the user field is free, and on edit it can be changed, so anyone with the permission can make a key that acts as any other user, superusers included;\nthe API Keys list returns the key value of every key.\n\nBecause of that we can only give it to admins. When a technician needs API access (scripts, automation), an admin has to create the key and then hand it over, and the admin keeps seeing everyone's keys.\nDescribe the solution you'd like\nA new role permission, e.g. \"Manage own API keys\". For a non-superuser who has it:\n\nthe list shows only their own keys;\ncreate always assigns the key to the requesting user (the user field is ignored);\nedit and delete work only on their own keys, and the user can't be changed.\n\n\"Manage API keys\" would keep working as it does today for admins.\nDescribe alternatives you've considered\nAdmins create the key and hand it over through a password manager. It works, but it doesn't scale and the admin sees every key.\nAdditional context\nWe run 1.5.2 with SSO-only login and a role per technician. If this sounds acceptable, I can open a PR against develop (API + tacticalrmm-web + tests).",
+   "labels": [],
+   "created_at": "2026-10-15T09:31:19+00:00",
+   "updated_at": "2026-10-15T09:31:19+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2556,
+   "verdict": "NOT_A_TASK",
+   "title": "More feature and support for Linux OS (Patch Management and Software)",
+   "body": "Currently there are a lot of native features that are missing in the Linux agent. I know you can run scripts, etc to make custom fields and mimic the native feature. What I would like to see is more native support on most common Linux OS (debian/ubuntu,RHEL,CentOS,Rocky etc). Features that I am looking for: Patches, Software inventory.",
+   "labels": [],
+   "created_at": "2026-09-21T21:20:36+00:00",
+   "updated_at": "2026-09-21T21:20:36+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2553,
+   "verdict": "FREE",
+   "title": "ability to configure wake the computer to run this task for trmm tasks",
+   "body": "Is your feature request related to a problem? Please describe.\ntacticalrmm tasks are configured to wake the computer\nDescribe the solution you'd like\nI'd like an option when creating a task to be able to decide if it should wake or not a computer because I don't think it's useful to wake them for most type of tasks",
+   "labels": [],
+   "created_at": "2026-09-14T07:15:16+00:00",
+   "updated_at": "2026-09-14T07:15:16+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2546,
+   "verdict": "FREE",
+   "title": "[Feature Request]: more infos for \"remote_session\"",
+   "body": "hi!\nis it possible to get some more information about a \"remote_session\" in audit log?\nlike \"leave_time\" (corresponding to \"entry_time\") so i can calculate the duration of the session.\nalso i would be useful to have the possibilty to append a comment or a note to a \"remote_session\"\nthanks\n-arni",
+   "labels": [],
+   "created_at": "2026-09-02T20:31:56+00:00",
+   "updated_at": "2026-09-03T06:47:48+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2544,
+   "verdict": "FREE",
+   "title": "Update EOL base images: mongo:4.4, postgres:13-alpine, redis:6.0-alpine",
+   "body": "Summary\nThe Docker deployment currently pins three base images that have all reached\nend-of-life and no longer receive security patches:\n\n\n\nImage\nStatus\nEOL date\n\n\n\n\nmongo:4.4\nEOL\nFebruary 2024\n\n\npostgres:13-alpine\nEOL\nNovember 2025\n\n\nredis:6.0-alpine\nEOL\n~2023\n\n\n\nFor self-hosted installations this means any vulnerability disclosed against\nthese versions stays permanently unpatched, since upstream will not backport\nfixes to EOL branches.\nImpact\nMongoDB 4.4 is the most pressing of the three. It is the only one of the\nthree where we are aware of a disclosed vulnerability with no available\npatch path, because the fix was only released for supported branches.\nThis is not a TRMM code vulnerability — the images are not exposed externally\nin a default deployment, and network isolation limits the practical risk.\nThe concern is that the gap widens over time and cannot be closed by the\noperator without deviating from the supported deployment.\nCompliance-wise this is also becoming awkward: EOL components show up in\nvulnerability scanners (in our case Checkmk flags all three as CRIT) and\nhave to be justified as accepted risk in audits, which is hard to defend\nlong-term when no remediation path exists.\nQuestions\n\nIs a migration to supported versions (MongoDB 7.x/8.x, PostgreSQL 16/17,\nRedis 7.x) on the roadmap?\nIs MongoDB 4.4 a hard dependency of the bundled MeshCentral version, or\nwould bumping MeshCentral allow a newer MongoDB?\nAre there known schema/driver blockers that make this non-t",
+   "labels": [],
+   "created_at": "2026-09-01T07:16:04+00:00",
+   "updated_at": "2026-09-01T07:16:04+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2537,
+   "verdict": "FREE",
+   "title": "Windows patching gets stuck with a previously uninstalled patch.",
+   "body": "Server Info (please complete the following information):\n\nOS: Ubuntu 22.04\nBrowser: firefox\nRMM Version (as shown in top left of web UI): 1.5.2\n\nInstallation Method:\nStandard with --insecure flag at install\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI): 2.11.0\nAgent OS: Windows Server 2025\n\nDescribe the bug\nTactical RMM does not install a previously uninstalled patch.\nTo Reproduce\n\nI manually installed KB5120233\nReboot Windows\nI manually removed KB5120233\nReboot Windows\nTactical RMM lists KB5120233 as available to install\nApprove KB5120233\nClick \"Install approved updates\"\nThe update just lingers around and doesn't get installed. It seems to just be stuck.\n\nExpected behavior\nI expect Tactical RMM to install the patch.\nScreenshots\nN/A\nAdditional context\nManually clicking check for updates inside of windows will cause windows to automatically install KB5120233.",
+   "labels": [],
+   "created_at": "2026-08-20T22:11:33+00:00",
+   "updated_at": "2026-08-20T22:11:33+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2536,
+   "verdict": "FREE",
+   "title": "Option to open Take Control / Remote Background in a new tab instead of a popup window",
+   "body": "Is your feature request related to a problem? Please describe.\nWhen I use Take Control, Remote Background or open an agent in a new window, it always opens as a separate popup browser window. When working with several agents at the same time, this quickly clutters the desktop and taskbar with lots of standalone windows. I find it much harder to organize and switch between them compared to regular browser tabs.\nDescribe the solution you'd like\nAn option in User Preferences to open these sessions in a new browser tab instead of a popup window. The current behavior could stay as the default, so nothing changes for users who prefer separate windows.\nDescribe alternatives you've considered\nIn Firefox, setting browser.link.open_newwindow.restriction to 0 in about:config forces all popup windows to open as regular tabs. I've tested this and it works with Tactical RMM - Take Control and Remote Background open in tabs and display perfectly fine. However, this is a Firefox-only hidden setting, it affects all websites (some popups genuinely should be separate windows), and Chrome/Edge have no built-in equivalent, so it's more of a workaround than a real solution.",
+   "labels": [],
+   "created_at": "2026-08-20T04:38:57+00:00",
+   "updated_at": "2026-08-20T04:38:57+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2535,
+   "verdict": "NOT_A_TASK",
+   "title": "rmm API protection guidelines",
+   "body": "Hi! Thanks for this software, it's super useful.\nI'd like to restrict all admin API routes to a list of IPs, while letting the routes used by agents unrestricted.\nI know how to do that on my reverse proxy, but I struggle to find which routes are used by agents.\nI guess one of the websockets are used, but there are a lot of routes in the API, and don't want to miss anything.\nCould you write the list of all routes used by agents? I'm willing to contribute to the doc if you say in which page you'd like to see this information.",
+   "labels": [],
+   "created_at": "2026-08-19T10:12:09+00:00",
+   "updated_at": "2026-08-19T18:49:20+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-08-19T18:49:20+00:00",
+     "body": "https://docs.tacticalrmm.com/securing_nginx/#enabling-owasp-core-rule-set"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2534,
+   "verdict": "NOT_A_TASK",
+   "title": "[Bug-Report] CPU Usage >100%",
+   "body": "Server Info (please complete the following information):\n\nOS: Ubuntu 22.04\nBrowser: Edge\nRMM Version : v1.5.2\n\nInstallation Method:\nStandard\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI): v2.11.0\nAgent OS: Server 2019 Standard\n\nDescribe the bug\nRemote Background shows CPU usage ob >100% (adding all cores?)\nTo Reproduce\nSteps to reproduce the behavior:\nOpen Remote Background\nGive the server something to work\nHave a look to CPU Usage\nHave a look to Taskmanager or CPU Load Check\nCompare difference of values\nExpected behavior\ncorrect values",
+   "labels": [],
+   "created_at": "2026-08-18T16:39:05+00:00",
+   "updated_at": "2026-08-18T17:57:31+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-08-18T17:32:10+00:00",
+     "body": "expected behavior it's all cores usage added"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-18T17:57:31+00:00",
+     "body": "Why? So the technician should first check how many cores the server has and then calculate it in real time?"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2533,
+   "verdict": "FREE",
+   "title": "macOS ARM64 agent can disappear or leave orphaned meshagent; command runner may starve heartbeat",
+   "body": "Summary\nOn multiple Apple Silicon macOS endpoints running Tactical RMM agent 2.11.0, we have observed two related reliability problems:\n\nThe Tactical agent can later disappear completely while an orphaned Mesh agent remains.\nLarge macOS Unified Log commands sent through the Tactical script runner can make the endpoint temporarily stop responding to NATS commands and appear offline.\n\nEnvironment\n\nmacOS Apple Silicon (darwin/arm64)\nTactical agent 2.11.0\nMeshCentral child agent\nLaunchDaemon installation under /opt/tacticalagent and /opt/tacticalmesh\n\nProblem 1: agent disappearance\nThe expected installation initially looks healthy:\nsystem/tacticalagent = running\n/Library/LaunchDaemons/tacticalagent.plist\n/opt/tacticalagent/tacticalagent -m svc\n/opt/tacticalmesh/meshagent --no-embedded=\"1\"\n\nThe plist contains:\nKeepAlive = true\nRunAtLoad = true\n\nAfter the endpoint becomes unreachable, both the Tactical plist and /opt/tacticalagent/tacticalagent may be absent, while /opt/tacticalmesh/meshagent can remain behind as an orphan.\nA subsequent reinstall reported:\nExisting meshagent found, attempting to remove...\nUninstalling previous installation... [DONE]\nUninstalling launch agent... [ERROR]\n\nThe installer then recreated the Tactical LaunchDaemon successfully.\nWe have not found matching syspolicyd or XProtectRemediator evidence proving that macOS security removed the files.\nProblem 2: script runner / heartbeat starvation\nA bounded diagnostic command using runscriptfull works normally. Ho",
+   "labels": [],
+   "created_at": "2026-08-18T16:04:19+00:00",
+   "updated_at": "2026-09-22T17:54:11+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-09-22T17:54:11+00:00",
+     "body": "We are having this exact same issue...."
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2532,
+   "verdict": "FREE",
+   "title": "Negative Boot Time (\"-xxx seconds ago\")",
+   "body": "Server Info:\n\nRMM Version (as shown in top left of web UI): 1.5.1\n\nAgent Info:\n\nAgent OS: Windows\n\nDescribe the bug\nIf a device´s RTC is set incorrectly (ahead), Boot Time is shown as negative value.\nI´d expect a warning or an indicator that this value is not plausible.\nHowever, this \"bug\" (?) indicates that the boot time does not reflect the uptime of the device as recorded by TRMM but the value that windows calculates.\nTo Reproduce\nSteps to reproduce the behavior:\n\nDiasable or filter NTP via firewall\nSet clock 2 hrs ahead\nReboot\nRefresh device list in TRMM UI\nSolved automatically if device gets a correct time via NTP or manually.\n\nScreenshots\n\nAdditional context\nBunch of devices behind a restrictive firewall. At boot time, NTPDATE will fetch correct time with a delay of 3 minutes. During this period, TRMM will show the negative value, i.e. what Windows calculates.\nI understand that there can be only one source.\nSo in my opinion an \"unplausible\" indicator would fit best.",
+   "labels": [],
+   "created_at": "2026-08-17T19:29:06+00:00",
+   "updated_at": "2026-08-17T19:33:29+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2529,
+   "verdict": "FREE",
+   "title": "script can't output text with accents / diacritical marks",
+   "body": "Server Info (please complete the following information):\n\nOS: Debian 12\nBrowser: Chrome\nRMM Version (as shown in top left of web UI): v1.5.1\n\nInstallation Method:\n\n Standard\n Standard with --insecure flag at install\n Docker\n\nAgent Info (please complete the following information):\n\nAgent version (as shown in the 'Summary' tab of the agent from web UI): v2.11.0\nAgent OS: Win 10 1809 and Win 11 25H2\n\nDescribe the bug\nWhen trying out a script that outputs text with accents (I think this is called diacritical marks) it either doesn't display them or replaces them.\nI'm actually trying to use a Collector Task with a Custom Field, but the bug also appears when running the script manually\nTo Reproduce\nSteps to reproduce the behavior:\n\n\ncreate a Powershell script with the following content:\nWrite-Host 1 è\nWrite-Host 2 é\nWrite-Host 3 ç\nWrite-Host 4 ï\nWrite-Host 5 à\n\n\nRun it on any Windows machine\n\n\nlook at the output, for me it outputs this:\n\n\n1\n2 Ǹ\n3\n4\n5\nExpected behavior\nOutput the text with the right accents / diacritical marks",
+   "labels": [],
+   "created_at": "2026-08-15T12:21:34+00:00",
+   "updated_at": "2026-08-30T09:19:23+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-20T12:37:12+00:00",
+     "body": "I did some additional testing with Windows PowerShell 5.1.\nForcing UTF-8 output at the beginning of the script fixes the output for me:\n$Utf8 = New-Object System.Text.UTF8Encoding($false)\n[Console]::OutputEncoding = $Utf8\n$OutputEncoding = $Utf8\nWith this, characters such as é è ê à ù ç ô € ✓ ⚠ are displayed correctly in Tactical RMM.\nWithout it, my PowerShell session reports:\nConsole encoding : Western European (DOS)\nConsole codepage : 850\nOutput encoding  : US-ASCII\n\nI also did a test on the temporary .ps1 file created in C:\\ProgramData\\TacticalRMM.\nFor a script containing:\n$TestValue = \"é\"\nthe temporary file contains the correct UTF-8 bytes:\nC3 A9\n\nand no BOM.\nHowever, when executed with Windows PowerShell 5.1, the runtime string contains two characters instead of one:\nRuntime string le"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-30T09:19:23+00:00",
+     "body": "Hi @SyNode-IT\nThank you for the detailed response\nFor me, adding your code\n$Utf8 = New-Object System.Text.UTF8Encoding($false)\n[Console]::OutputEncoding = $Utf8\n$OutputEncoding = $Utf8\n\nat the start of the script does indeed fix the issue\nAdding UTF-8 BOM to all the scripts would fix the issue for everyone\nThx again SyNode-IT"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2528,
+   "verdict": "FREE",
+   "title": "Default filter",
+   "body": "i would like to have possibility to add a default filter like displaying per default only online machines",
+   "labels": [],
+   "created_at": "2026-08-14T13:48:01+00:00",
+   "updated_at": "2026-08-15T09:26:49+00:00",
+   "linked_prs": 0,
+   "comment_count": 2,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-08-15T00:15:25+00:00",
+     "body": "There is already an online filter.\nIs this request to be able to define a default filter for the agent list?"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-15T09:26:49+00:00",
+     "body": "Yes à default one that do no disparear one very client change on the client tree\n\nRegards\n\n\n\n\nLe 15 août 2026 à 02:15, silversword411 ***@***.***> a écrit :\n\n﻿\nVous n’obtenez pas souvent d’e-mail à partir de ***@***.*** Pourquoi c’est important<https://aka.ms/LearnAboutSenderIdentification>\n[https://avatars.githubusercontent.com/u/13395348?s=20&v=4]silversword411 left a comment (amidaware/tacticalrmm#2528)<#2528 (comment)>\n\nThere is already an online filter.\n\nIs this request to be able to define a default filter for the agent list?\n\n—\nReply to this email directly, view it on GitHub<#2528?email_source=notifications&email_token=A2IAT4KSUCKHCPUMQXNDCHD5J6TTHA5CNFSNUABFM5UWIORPF5TWS5BNNB2WEL2JONZXKZKDN5WW2ZLOOQXTKMRZHE2DEMJQGEZ2M4TFMFZW63VGMF2XI2DPOKSWK5TFNZ2KYZTPN52GK4S7MNWGSY3L#issuecomment-"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2525,
+   "verdict": "FREE",
+   "title": "Feature Request: Client Groups for Bulk Script and Command Execution",
+   "body": "Is your feature request related to a problem? Please describe.\nI'm always frustrated when I need to execute the same script or command across a specific subset of clients. Currently, this process is highly manual, requiring me to either run the command one by one or manually select individual clients every time, which is time-consuming and prone to human error when managing a large number of clients.\nDescribe the solution you'd like\nI would like a new feature that allows the creation and management of \"Client Groups.\" Users should be able to define custom groups (e.g., by environment, tier, or region) and assign clients to them. When launching a script or executing a command, there should be a straightforward option to select a specific \"Client Group\" as the target, enabling massive, automated execution for all clients within that group at once.\nDescribe alternatives you've considered\nAn alternative I've considered is maintaining external spreadsheets or lists of client IDs to manually filter them, or writing custom API scripts outside the platform to handle the grouping logic and loop through the executions. However, having this natively integrated into the platform would be far more efficient.\nAdditional context\nImplementing this would significantly improve operational efficiency and scaling capabilities for teams that need to manage large fleets of clients on a daily basis.",
+   "labels": [
+    "enhancement"
+   ],
+   "created_at": "2026-07-29T11:40:00+00:00",
+   "updated_at": "2026-07-29T13:39:09+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-07-29T13:39:09+00:00",
+     "body": "#2056 #992 #653"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2522,
+   "verdict": "NOT_A_TASK",
+   "title": "[feature request] Single button access to meshcentral",
+   "body": "It would be nice to have a  button or menu option in TRMM that will open and log you in to your user's meshcentral account with a single click. rather than having to manually open a new tab, go to my meshcentral site, and login again.",
+   "labels": [],
+   "created_at": "2026-07-27T15:08:17+00:00",
+   "updated_at": "2026-07-29T08:20:23+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-07-29T08:20:23+00:00",
+     "body": "There is already auto mesh login when you enable mesh integration in the settings"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2518,
+   "verdict": "NOT_A_TASK",
+   "title": "[Feature Request] Form for arguments on running scripts on agents",
+   "body": "I was wondering if it would be possible to have it when running a script default arguments which are blank can be set that are required to be entered on a popup\n\nso when they are left blank then you get a popup asking for those fields so for example it would popup with a box like this requesting those arguments like this quick mock up.",
+   "labels": [],
+   "created_at": "2026-07-21T15:19:02+00:00",
+   "updated_at": "2026-08-07T14:34:59+00:00",
+   "linked_prs": 0,
+   "comment_count": 3,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-07-29T16:15:17+00:00",
+     "body": "Doesn't sound practical. How can you differentiate between a param flag and a param where you want to have it prompt for data? The only way to do that would be a special char that is watched for...at which point you have to have a char that is never used in any language and will never be usable in a param.\nSo what you're asking for is a second popup that asks for params and env var's on every run...but the prompt is already there, just type the param in.\nI say close as not planned"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-08-07T09:59:03+00:00",
+     "body": "I think it would be quite simple to differentiate, if you want a param that requires a prompt you can have something like a question mark on it's default value \"-serveraddress ?\" for example as I don't see what params would just use a single question mark\nmy main thoughts for it is because we have added alot of custom scripts for use with our customers so for example we have a script to install IPP printers where you add in the ip address of the printer and the printer name it would be easy to just have a prompt for those fields instead of having to remove the param and then re-add them it with the details."
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-08-07T14:34:59+00:00",
+     "body": "#2086 👋"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2517,
+   "verdict": "NOT_A_TASK",
+   "title": "[White Label] Script-based solution: Tactical RMM + MeshCentral interface customization",
+   "body": "Context\nThis issue complements the closed request \"Feature request: white label support\" (#463).\nSince the original issue is closed and I don't have collaborator permissions to comment, I'm opening this new one to share what I've managed to implement.\nIt's a homegrown white label solution using bash scripts that apply customizations after each Tactical RMM update.\n\nWhat the scripts do\n\nReplace the page title (from \"Tactical RMM\" to the desired name)\nChange the logo (SVG, PNG) on the login page and in the interface\nReplace the favicon\nUpdate the background (daily image, swapped automatically)\nApply visual tweaks via CSS (colors, opacity, form fields, cards, autofill, etc.)\nAdjust the welcomePicture and welcomePictureFullScreen settings in MeshCentral's config.json\nRestart MeshCentral after the changes\n\n\nSummary of the structure\nI have two main scripts:\ncopy-imagens.sh – selects the day's image (bg-YYYYMMDD.webp or .jpg) and copies it to the TRMM and MeshCentral directories.\ntrmm-post-update.sh – performs all title, CSS, favicon, logo, and MeshCentral configuration replacements, etc.\nThe source image folder is organized like this:\n/home/user/backup/images/ \n├── favicon.ico \n├── islsuporte.svg \n├── islsuporte.png \n├── islsuporte-login.png \n├── 01/ # January │ \n        └── bg01.webp │ \n        └── bg02.webp │ \n├── 02/ # February \n        └── …\n\nThe copy-imagens.sh script uses $(date +%m) and $(date +%d) to build the path for the day's image.\n\nCron schedule (crontab)\n# Copy the da",
+   "labels": [],
+   "created_at": "2026-07-18T18:39:58+00:00",
+   "updated_at": "2026-07-18T18:43:51+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2514,
+   "verdict": "FREE",
+   "title": "Linux install on workstations",
+   "body": "Installing requires a SSH session, or switching to a non-GUI console session.\nIt would be great if I could just open terminal and run \"sudo trmm-installer.sh\"\nI have other tools that I use for personal remote management that allow me to use \"sudo install.sh\" and they are root/system level access.\nIt would be nice if we could just run it from the GUI instead of getting stopped by the requirement to be headless.",
+   "labels": [],
+   "created_at": "2026-07-16T20:42:36+00:00",
+   "updated_at": "2026-07-16T20:42:36+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2508,
+   "verdict": "NOT_A_TASK",
+   "title": "Feature: Freshdesk integration and/or sync",
+   "body": "Is your feature request related to a problem? Please describe.\nIt's not a problem.\nDescribe the solution you'd like\nIt would be convenient to automatically create a ticket when a machine has a warning, other wise around, it would be great to sync devices to Freshdesk and with a press of the button go directly to the Freshdesk creation of a new ticket.\nPlease see; https://developers.freshdesk.com/api/#create_ticket\nDescribe alternatives you've considered\nThere are no 3rd party ticketing tools availible right now for integration. Closest i have found was a Sync with HUDU.",
+   "labels": [],
+   "created_at": "2026-07-07T08:40:44+00:00",
+   "updated_at": "2026-07-07T08:43:17+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "COLLABORATOR",
+     "at": "2026-07-07T08:43:17+00:00",
+     "body": "This can be done with web hooks\nhttps://docs.tacticalrmm.com/functions/webhooks/"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2506,
+   "verdict": "FREE",
+   "title": "update.sh modifies /etc/hosts in a way that breaks MeshCentral behind an external reverse proxy",
+   "body": "Server Info\n\nOS: Debian 12\nBrowser: Chrome\nTactical RMM Version: 1.5.1\n\nInstallation Method\n\n Standard\n Standard with --insecure\n Docker\n\nAgent Info\n\nAgent Version: 2.9.11\nAgent OS: Windows 11 (also affects other clients)\n\n\nDescribe the bug\nAfter upgrading Tactical RMM, all MeshCentral remote functionality stopped working although the Tactical agents themselves remained online.\nAffected features:\n\nLive Terminal\nTake Control\nMesh Remote Session\n\nThe Tactical agent continued communicating with the server normally, but MeshCentral refused all agent connections.\nMeshCentral logs continuously showed:\nAgent bad web cert hash\nAgent:e8126baa...\nServer:e5b035c1... or a4bbd759...\n\n\nDeployment\nOur deployment is not an all-in-one installation.\nInternet\n    │\nCloudflare\n    │\nNGINX Reverse Proxy (VM1)\n    │\nMeshCentral / Tactical RMM (VM2)\n\nThe reverse proxy is intentionally hosted on a separate VM.\nMeshCentral is configured with:\n\"certUrl\": \"https://mesh.example.com:443/\"\n\nRoot cause\nAfter troubleshooting, I found that the update script automatically modified /etc/hosts and added the public hostnames to the 127.0.1.1 entry.\nExample:\n127.0.1.1 api.example.com rmm.example.com mesh.example.com\n\nBecause of this, mesh.example.com no longer resolved through DNS.\nInstead, MeshCentral resolved mesh.example.com locally.\nThis caused MeshCentral to calculate the certificate hash using a different certificate than the one actually presented to clients through the reverse proxy.\nExisting Mesh agents ",
+   "labels": [],
+   "created_at": "2026-06-29T21:26:22+00:00",
+   "updated_at": "2026-06-29T21:27:52+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2505,
+   "verdict": "FREE",
+   "title": "This check is overriden by a policy - Error",
+   "body": "Server Info (please complete the following information):\n\nOS: Ubuntu 22.04\nBrowser: edge\nRMM Version 1.5.1\n\nInstallation Method:\n\n Standard\n Standard with --insecure flag at install\n[X ] Docker\n\nAgent Info (please complete the following information):\n\nAgent version v2.11.0\nAgent OS: Win Server 2022\n\nDescribe the bug\nIt is not possible to use one script in several checks. TRMM blocks it as \"This check is overriden by a policy\". So I can not run one script as different check with other parameters. Is it not the case, that TRMM gives each check a uniqe check id? Is this a bug or a feature?\nTo Reproduce\nSteps to reproduce the behavior:\n\nCreate a script check\nCreate a second script check with the same script but with other parameters\nPress \"Run Checks Now\"\nZack - Script blocket as overriden by a policy\n\nExpected behavior\nI expectet that TRMM uses a uniqe check id and it is possibel to run one script in several checks with different parameters\nScreenshots\n\nAdditional context\nAdd any other context about the problem here.",
+   "labels": [],
+   "created_at": "2026-06-28T14:20:02+00:00",
+   "updated_at": "2026-07-01T10:01:53+00:00",
+   "linked_prs": 0,
+   "comment_count": 5,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-06-29T19:58:53+00:00",
+     "body": "#1462"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-06-30T11:30:02+00:00",
+     "body": "#1462 ist the only way? If I do so all other checks are gone. This is not what I want.\nThe automation policy does not include this checks I want to add. All of them are manually added."
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-06-30T18:53:01+00:00",
+     "body": "same issue either dupe the script or consolidate the code"
+    },
+    {
+     "is_bot": false,
+     "association": "NONE",
+     "at": "2026-06-30T20:58:34+00:00",
+     "body": "That's too bad. Maybe we could submit that as a feature request. After all, there is a CheckID for every check. Until then, I'll group the scripts into tasks. There, you can insert a script with different parameters."
+    },
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-07-01T10:01:53+00:00",
+     "body": "it's a bug and need fixing IMO"
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2491,
+   "verdict": "NOT_A_TASK",
+   "title": "[Feature Request] Bulk Script Filtering Options (By Check)",
+   "body": "Is your feature request related to a problem? Please describe.\nNo, not a problem.\nDescribe the solution you'd like\nWhen I do a bulk script execution, I'd like to be able to filter by checks as well as the existing filters.\nFor example, I've got created a check to verify if the system will prompt a local account to create a Microsoft account on login and then I've got a script to disable that.  I'd like to be able to push the script to disable out, but filter it down using the existing location filters (site, client, selected agent) and then further filter to say only run if this check exists on the agent and is in this state (alerting, or clear, either or).  So if the client doesn't have the check existing or it hasn't run yet or is in a different state from desired, it just does not run that script, can replace output if saving to a variable or note with a note that it didn't meet criteria or whatever.  Maybe have options similar to the return codes to treat it different ways.\nDescribe alternatives you've considered\nBest alternative I can think of is to either go one by one through clients pushing the script or make a list of clients I want to push to and then manually type them out in the bulk editor.",
+   "labels": [],
+   "created_at": "2026-06-14T15:17:33+00:00",
+   "updated_at": "2026-06-14T21:41:53+00:00",
+   "linked_prs": 0,
+   "comment_count": 1,
+   "comments": [
+    {
+     "is_bot": false,
+     "association": "CONTRIBUTOR",
+     "at": "2026-06-14T21:41:53+00:00",
+     "body": "on failure tasks does that."
+    }
+   ]
+  },
+  {
+   "repo": "amidaware/tacticalrmm",
+   "number": 2477,
+   "verdict": "FREE",
+   "title": "Minimum compatibility and official support for SNI Passthrough reverse proxy deployments",
+   "body": "Is your feature request related to a problem? Please describe.\nYes. Tactical RMM currently does not appear to officially support reverse proxy deployments.\nThis creates a limitation for small and medium-sized businesses, MSPs, and on-premises infrastructures that do not have a dedicated public IP address available exclusively for Tactical RMM.\nIn my infrastructure, several public services share the same internet entry point. I already have a front-facing proxy/gateway server responsible for receiving inbound HTTPS traffic and routing it to the correct internal service. Because Tactical RMM uses multiple services and subdomains, such as the web panel, API, and MeshCentral, terminating TLS at the external proxy and forwarding HTTP internally is not ideal.\nFor this reason, I adopted an SNI Passthrough approach. The external proxy does not decrypt HTTPS traffic. It only inspects the TLS SNI hostname and forwards the TCP connection to the Tactical RMM server, allowing Tactical RMM to keep control of TLS termination, certificates, WebSocket behavior, and its internal expected configuration.\nThis solution is currently working well in my environment, but because it is not officially documented or supported, there is a risk that a future Tactical RMM release may change behavior and unintentionally break this deployment model.\nDescribe the solution you'd like\nI would like Tactical RMM to officially recognize and minimally support SNI Passthrough reverse proxy deployments as a valid dep",
+   "labels": [],
+   "created_at": "2026-06-03T13:37:55+00:00",
+   "updated_at": "2026-06-03T13:37:55+00:00",
+   "linked_prs": 0,
+   "comment_count": 0,
+   "comments": []
+  }
+ ]
+}
