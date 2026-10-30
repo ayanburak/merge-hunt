@@ -9,7 +9,7 @@
 // are there, so ResultsView can take them as plain props and never deals with loading.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import {
@@ -87,9 +87,15 @@ function ResultsView({ id, defaults, profiles }: { id: number; defaults: Profile
   const scan = useScanStatus(id).data;
   const ready = repos !== undefined;
 
-  // A running scan keeps adding repos, each one it finishes asks for fresh results.
+  // A running scan keeps adding repos, each one it finishes asks for fresh results. The first
+  // sight of a scan changes nothing, the page has already asked for its results by then. The ref
+  // has to outlive the effect, StrictMode runs an effect twice on arrival.
+  const seen = useRef<string | null>(null);
   useEffect(() => {
-    if (scan) client.invalidateQueries({ queryKey: ["results", id] });
+    if (!scan) return;
+    const state = `${scan.done} ${scan.status}`;
+    if (seen.current !== null && seen.current !== state) client.invalidateQueries({ queryKey: ["results", id] });
+    seen.current = state;
   }, [client, id, scan?.done, scan?.status]);
 
   useEffect(() => {
