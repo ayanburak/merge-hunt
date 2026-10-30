@@ -25,6 +25,7 @@ import { FilterPanel } from "../components/FilterPanel";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { RepoSort, RepoTable } from "../components/RepoTable";
 import type { SortKey } from "../components/RepoTable";
+import { ScanFailures } from "../components/ScanFailures";
 import { ScoringPanel } from "../components/ScoringPanel";
 import { TopBar } from "../components/TopBar";
 import { clock, day, number } from "../format";
@@ -156,6 +157,7 @@ function ResultsView({ id, defaults, profiles }: { id: number; defaults: Profile
                 </span>
               )}
               {notice && <p className={styles.notice}>{notice}</p>}
+              {scan && scan.status !== "RUNNING" && <ScanFailures failures={scan.failures} />}
             </div>
           </div>
           <div className={styles.controls}>

@@ -125,33 +125,6 @@
   color: var(--ink);
 }
 
-.failures {
-  max-width: 640px;
-  margin-top: 12px;
-  font-size: 16px;
-  color: var(--ink-2);
-}
-
-.failures ul {
-  max-height: 150px;
-  margin-top: 8px;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-  font-size: 14px;
-}
-
-.failures li {
-  padding: 6px 0;
-  border-top: 1px solid var(--ink-4);
-}
-
-.failures b {
-  display: block;
-  font-weight: 600;
-  color: var(--ink);
-}
-
 .actions {
   display: flex;
   align-items: center;

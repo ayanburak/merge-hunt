@@ -11,6 +11,7 @@ import { Link } from "react-router";
 
 import type { ScanDetail } from "../api/client";
 import { clock, duration, number } from "../format";
+import { ScanFailures } from "./ScanFailures";
 import styles from "./ScanProgress.module.css";
 
 type Props = {
@@ -131,16 +132,7 @@ export function ScanProgress({ scan, unreachable, onNew }: Props) {
         <div>
           <Headline scan={scan} known={known} finished={finished} kept={kept} />
           {unreachable && <p className={styles.detail}><b>The backend is not reachable.</b> The numbers above may be old.</p>}
-          {!running && scan.failures.length > 0 && (
-            <div className={styles.failures}>
-              <p>{scan.failures.length} could not be fetched completely.</p>
-              <ul>
-                {scan.failures.map((failure) => (
-                  <li key={failure.repo}><b>{failure.repo}</b>{failure.error}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {!running && <ScanFailures failures={scan.failures} open />}
           <div className={styles.actions}>
             {scan.done > 0 && (
               <Link className={styles.link} to={results}>
