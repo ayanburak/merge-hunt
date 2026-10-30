@@ -3,7 +3,8 @@ file: scans.py
 importable: router
 
 POST /scans starts a scan, GET /scans lists the latest ones and GET /scans/{id}
-tells how one is going. POST /scans/{id}/results scores the repos of a scan with
+tells how one is going. GET /scans/defaults gives the options a new scan starts
+from, so the form shows the same values the backend would use. POST /scans/{id}/results scores the repos of a scan with
 the settings in its body. It is a POST because those settings do not fit in a
 URL, nothing is saved and a scan still running gives the repos done so far.
 The parts come from app.state, main.py puts them there when the app starts, so
@@ -15,7 +16,7 @@ description: The API endpoints that start a scan, report its progress and give i
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status
 
 from merge_hunt.api.schemas import ProfileSettings, ScanCreated, ScanRequest
-from merge_hunt.domain.scans import Scan
+from merge_hunt.domain.scans import Scan, ScanDetail
 from merge_hunt.domain.scoring import ScoredRepo
 from merge_hunt.jobs.scans import ScanAlreadyRunningError
 
@@ -35,11 +36,16 @@ async def start_scan(body: ScanRequest, request: Request) -> ScanCreated:
 async def list_scans(request: Request, limit: int = Query(20, ge=1, le=100)) -> list[Scan]:
     return await request.app.state.scans.recent(limit)
 
-# The UI calls this every few seconds while a scan runs. Scan is a frozen
+# Has to stay above /{scan_id}, otherwise defaults would be read as a scan id.
+@router.get("/defaults")
+async def scan_defaults() -> ScanRequest:
+    return ScanRequest()
+
+# The UI calls this every few seconds while a scan runs. ScanDetail is a frozen
 # dataclass, FastAPI sends it as JSON as it is.
 @router.get("/{scan_id}")
-async def get_scan(scan_id: int, request: Request) -> Scan:
-    scan = await request.app.state.scans.load(scan_id)
+async def get_scan(scan_id: int, request: Request) -> ScanDetail:
+    scan = await request.app.state.scans.detail(scan_id)
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Scan {scan_id} does not exist")
     return scan

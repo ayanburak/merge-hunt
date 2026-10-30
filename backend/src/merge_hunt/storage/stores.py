@@ -33,6 +33,7 @@ description: Saves and loads repos, their pull request and commit data, scans an
 # fetch, and a write that fails half way leaves the old data as it was.
 
 from collections.abc import Iterable
+from dataclasses import asdict
 from datetime import datetime
 
 from sqlalchemy import delete, select, update
@@ -52,7 +53,7 @@ from merge_hunt.domain.models import (
     Repo,
     RepoRef,
 )
-from merge_hunt.domain.scans import Scan, ScanStage, ScanStatus
+from merge_hunt.domain.scans import Scan, ScanDetail, ScanFailure, ScanStage, ScanStatus
 from merge_hunt.domain.scoring import SavedProfile
 from merge_hunt.storage.tables import (
     CommitRow,
@@ -412,6 +413,23 @@ class ScanStore:
         async with self._sessions() as session:
             row = await session.get(ScanRow, scan_id)
             return None if row is None else _scan(row)
+
+    # The UI asks this every few seconds while a scan runs. The failed repos are
+    # read in the same session, so the list always matches the failed count.
+    async def detail(self, scan_id: int) -> ScanDetail | None:
+        """Loads a scan with the repos that failed, None when there is no scan with this id."""
+        async with self._sessions() as session:
+            row = await session.get(ScanRow, scan_id)
+            if row is None:
+                return None
+            failed = await session.execute(
+                select(RepoRow.owner, RepoRow.name, ScanRepoRow.error)
+                .join(ScanRepoRow, ScanRepoRow.repo_id == RepoRow.id)
+                .where(ScanRepoRow.scan_id == scan_id, ScanRepoRow.error.is_not(None))
+                .order_by(ScanRepoRow.id)
+            )
+            failures = [ScanFailure(f"{owner}/{name}", error) for owner, name, error in failed]
+            return ScanDetail(**asdict(_scan(row)), failures=failures)
 
     # Newest first, the UI takes the first one as the scan to show.
     async def recent(self, limit: int) -> list[Scan]:

@@ -121,6 +121,60 @@ def test_unknown_scan_is_not_found(tmp_path):
 
     assert run(tmp_path, body).status_code == 404
 
+# A repo that fails shows up with its full name and the reason, one that went
+# fine does not. A scan with no failure gives an empty list.
+def test_scan_lists_its_failed_repos(tmp_path):
+    scan_id = asyncio.run(save_failure(tmp_path))
+
+    async def body(client, _):
+        scan = (await client.get(f"/scans/{scan_id}")).json()
+        listed = (await client.get("/scans")).json()
+        return scan, listed
+
+    scan, listed = run(tmp_path, body)
+    assert scan["failed"] == 1
+    assert scan["failures"] == [{"repo": "owner/repo2", "error": "GitHub said no"}]
+    assert "failures" not in listed[0]
+
+def test_scan_without_failures_has_an_empty_list(tmp_path):
+    async def body(client, _):
+        await client.post("/scans", json={})
+        return (await client.get("/scans/1")).json()
+
+    assert run(tmp_path, body)["failures"] == []
+
+# --- GET /scans/defaults ---
+
+# An empty request has to behave the same as the defaults the form shows.
+def test_defaults_match_an_empty_request(tmp_path):
+    async def body(client, fake):
+        defaults = (await client.get("/scans/defaults")).json()
+        await client.post("/scans", json={})
+        await client.post("/scans", json=defaults)
+        return defaults, fake.started
+
+    defaults, started = run(tmp_path, body)
+    assert defaults["min_stars"] == 200 and defaults["max_prs"] == 500
+    assert started[0] == started[1]
+
+# --- CORS ---
+
+# The browser asks before a POST with a JSON body, the answer has to name the
+# frontend's origin. Any other origin gets no such header and the browser stops it.
+def test_cors_allows_only_the_frontend(tmp_path):
+    def preflight(origin):
+        async def body(client, _):
+            return await client.options("/scans", headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            })
+        return run(tmp_path, body)
+
+    allowed = preflight("http://localhost:5173")
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "access-control-allow-origin" not in preflight("http://evil.example").headers
+
 # --- GET /scans ---
 
 def test_list_scans_newest_first_and_limited(tmp_path):
@@ -138,6 +192,20 @@ def test_list_scans_newest_first_and_limited(tmp_path):
     assert too_many.status_code == 422
 
 # --- POST /scans/{id}/results ---
+
+# Puts a scan in the file with one repo done and one failed.
+async def save_failure(tmp_path) -> int:
+    engine = create_engine(database_url(tmp_path))
+    await create_tables(engine)
+    sessions = async_sessionmaker(engine)
+    repos, scans = RepoStore(sessions), ScanStore(sessions)
+    await repos.save_repos([Repo(id, "owner", f"repo{id}", 1000, 100, "Python", "MIT", (), 10, NOW, None) for id in (1, 2)], NOW)
+    scan_id = await scans.start({}, NOW)
+    await scans.set_discovered(scan_id, 2, [RepoRef(id, "owner", f"repo{id}") for id in (1, 2)])
+    await scans.record_repo(scan_id, 1, "FETCHED", None)
+    await scans.record_repo(scan_id, 2, "FAILED", "GitHub said no")
+    await engine.dispose()
+    return scan_id
 
 MAINTAINER = Actor("maya", False)
 SINCE = datetime.now(UTC) - timedelta(days=200)

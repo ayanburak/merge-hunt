@@ -27,11 +27,12 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from merge_hunt.api.routes.profiles import router as profiles_router
 from merge_hunt.api.routes.scans import router as scans_router
-from merge_hunt.config import Settings
+from merge_hunt.config import Settings, WebSettings
 from merge_hunt.github.client import HTTP_TIMEOUT, GitHubClient
 from merge_hunt.github.token import StaticTokenProvider
 from merge_hunt.jobs.scans import ScanJob
@@ -82,6 +83,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await engine.dispose()
 
     app = FastAPI(title="merge-hunt", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=(settings or WebSettings()).cors_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type"],
+    )
     app.include_router(scans_router)
     app.include_router(profiles_router)
     return app

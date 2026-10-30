@@ -1,6 +1,6 @@
 """
 file: scans.py
-importable: Scan, ScanStatus, ScanStage
+importable: Scan, ScanDetail, ScanFailure, ScanStatus, ScanStage
 
 A scan is one run of discovery and enrichment that the user started. Scan is
 how the database gives it back, with its state and its counts, the UI asks for
@@ -50,3 +50,15 @@ class Scan:
     failed: int
     waiting_until: datetime | None
     error: str | None
+
+# repo is the owner/name form, the same one people see on GitHub.
+@dataclass(frozen=True, slots=True)
+class ScanFailure:
+    repo: str
+    error: str
+
+# Only the answer about a single scan carries the failures, the scan list stays
+# one row per scan and needs no second look at scan_repos.
+@dataclass(frozen=True, slots=True)
+class ScanDetail(Scan):
+    failures: list[ScanFailure]
