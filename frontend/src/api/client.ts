@@ -32,6 +32,7 @@ export type Repo = Schemas["Repo"];
 export type RepoIssues = Schemas["RepoIssues"];
 export type AnalyzedIssue = Schemas["AnalyzedIssue"];
 export type FeedbackValue = Schemas["FeedbackValue"];
+export type HideReason = Schemas["HideReason"];
 
 // What the issue list can hide, the backend does the hiding.
 export type IssueFilter = {
@@ -39,6 +40,7 @@ export type IssueFilter = {
   hide_linked: boolean;
   max_age_days: number | null;
   show_skipped: boolean;
+  show_hidden: boolean;
 };
 
 // --- Requests ---
@@ -148,6 +150,7 @@ export function repoIssues(id: number, filter: IssueFilter): Promise<RepoIssues>
     hide_assigned: String(filter.hide_assigned),
     hide_linked: String(filter.hide_linked),
     show_skipped: String(filter.show_skipped),
+    show_hidden: String(filter.show_hidden),
   });
   if (filter.max_age_days !== null) query.set("max_age_days", String(filter.max_age_days));
   return request(`/repos/${id}/issues?${query}`);

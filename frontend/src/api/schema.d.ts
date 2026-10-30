@@ -227,6 +227,11 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HideReason
+         * @enum {string}
+         */
+        HideReason: "CLAIMED" | "SOLVED" | "NOT_READY" | "NOT_A_TASK";
         /** Issue */
         Issue: {
             /** Number */
@@ -264,6 +269,7 @@ export interface components {
         IssueAnalysis: {
             /** Claimed At */
             claimed_at?: string | null;
+            hide?: components["schemas"]["HideReason"] | null;
         };
         /** IssueComment */
         IssueComment: {
@@ -345,9 +351,9 @@ export interface components {
              *       "external_until_merges": 1,
              *       "extra_bots": [],
              *       "excluded_labels": [
-             *         "invalid",
+             *         "rejected AI",
              *         "spam",
-             *         "rejected AI"
+             *         "invalid"
              *       ],
              *       "ignored_after_days": 30,
              *       "window_days": 180,
@@ -405,9 +411,9 @@ export interface components {
              *       "metrics": {
              *         "commit_days": 90,
              *         "excluded_labels": [
-             *           "invalid",
+             *           "rejected AI",
              *           "spam",
-             *           "rejected AI"
+             *           "invalid"
              *         ],
              *         "external_until_merges": 1,
              *         "extra_bots": [],
@@ -480,6 +486,11 @@ export interface components {
             labels: string[];
             /** Issues */
             issues: components["schemas"]["AnalyzedIssue"][];
+            /**
+             * Hidden
+             * @default 0
+             */
+            hidden: number;
         };
         /** RepoMetrics */
         RepoMetrics: {
@@ -1079,6 +1090,7 @@ export interface operations {
                 hide_linked?: boolean;
                 max_age_days?: number | null;
                 show_skipped?: boolean;
+                show_hidden?: boolean;
             };
             header?: never;
             path: {

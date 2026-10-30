@@ -4,14 +4,22 @@
  * description: One issue with its facts, its feedback buttons and, when opened, its text and last comments.
  */
 
-// The claim warning comes from the backend with its date. It never hides anything, a claim from
-// years ago usually means the issue is free again and the date lets the reader judge that.
+// The claim warning comes from the backend with its date. A claim from years ago usually means
+// the issue is free again and the date lets the reader judge that. A hidden issue shows why it
+// was hidden, the rule can be wrong and the reader decides.
 
 import { useState } from "react";
 
-import type { AnalyzedIssue, FeedbackValue } from "../api/client";
+import type { AnalyzedIssue, FeedbackValue, HideReason } from "../api/client";
 import { ago, day } from "../format";
 import styles from "./IssueCard.module.css";
+
+const REASONS: Record<HideReason, string> = {
+  CLAIMED: "Hidden: someone is on it",
+  SOLVED: "Hidden: a comment says it is solved",
+  NOT_READY: "Hidden: its label says wait",
+  NOT_A_TASK: "Hidden: looks like a question or a plan",
+};
 
 type Props = {
   item: AnalyzedIssue;
@@ -43,6 +51,7 @@ export function IssueCard({ item, url, busy, onFeedback }: Props) {
             <span>{issue.comment_count === 1 ? "1 comment" : `${issue.comment_count} comments`}</span>
             {issue.assigned && <span className={styles.flag}>Assigned</span>}
             {issue.linked_prs > 0 && <span className={styles.flag}>Linked pull request</span>}
+            {analysis.hide && <span className={styles.flag}>{REASONS[analysis.hide]}</span>}
             {analysis.claimed_at && <span className={styles.flag} data-warn="">May be claimed, {day(analysis.claimed_at)}</span>}
           </div>
           <div className={styles.labels}>

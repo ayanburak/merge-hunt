@@ -139,6 +139,7 @@ function issueOf(number: number, title: string): AnalyzedIssue {
 export class FakeBackend {
   scans: ScanDetail[] = [];
   repos: ScoredRepo[] = [];
+  issuesFetchedAt = new Date().toISOString();
 
   // Every request the page sent, method first and in order, like GET /scans.
   readonly requests: string[] = [];
@@ -158,11 +159,19 @@ export class FakeBackend {
 
     const path = new URL(request.url()).pathname;
     this.requests.push(`${method} ${path}`);
-    const [status, body] = this.reply(method, path);
+    const [status, body] = this.reply(method, path, request.url());
     return route.fulfill({ status, headers: HEADERS, json: body });
   }
 
-  private reply(method: string, path: string): [number, unknown] {
+  // One free issue and one the rules put aside, which only comes back when asked for.
+  private issues(query: URLSearchParams): RepoIssues {
+    const taken = issueOf(13, "Add a new option");
+    const hidden: AnalyzedIssue = { ...taken, analysis: { claimed_at: "2026-10-29T10:00:00Z", hide: "CLAIMED" } };
+    const list = [issueOf(12, "Fix the broken link"), ...(query.get("show_hidden") === "true" ? [hidden] : [])];
+    return { fetched_at: this.issuesFetchedAt, labels: ["good first issue"], issues: list, hidden: 1 };
+  }
+
+  private reply(method: string, path: string, url: string): [number, unknown] {
     const parts = path.split("/").slice(1);
     const scan = this.scans.find((item) => item.id === Number(parts[1]));
     const repo = this.repos.find((item) => item.repo.id === Number(parts[1]));
@@ -179,10 +188,11 @@ export class FakeBackend {
     }
     if (parts[0] === "repos") {
       if (!repo) return [404, { detail: `Repo ${parts[1]} does not exist` }];
-      if (parts[2] === "issues") {
-        const issues: RepoIssues = { fetched_at: "2026-10-30T14:21:00Z", labels: ["good first issue"], issues: [issueOf(12, "Fix the broken link")] };
-        return [200, issues];
+      if (parts[3] === "refresh") {
+        this.issuesFetchedAt = new Date().toISOString();
+        return [200, null];
       }
+      if (parts[2] === "issues") return [200, this.issues(new URL(url).searchParams)];
       return [200, repo.repo];
     }
     return [500, { detail: `The fake backend has no answer for ${method} ${path}` }];

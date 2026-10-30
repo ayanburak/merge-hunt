@@ -7,9 +7,13 @@
 // No metrics here, they depend on a profile and this page belongs to no profile. The filters
 // stay on the page for the same reason. Every change asks the backend again, the rules of what
 // is hidden live only there.
+//
+// Issues get taken within days, so a list older than FRESH_MS is fetched again on arrival. The
+// saved list stays on screen meanwhile, the fetch takes a few seconds. tried keeps a failed fetch
+// from running again on every render.
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { ApiError, getRepo, giveFeedback, refreshIssues, repoIssues, takeBackFeedback } from "../api/client";
@@ -23,7 +27,9 @@ import styles from "./RepoDetailPage.module.css";
 
 const AGES: [number | null, string][] = [[null, "Any age"], [365, "1 year"], [730, "2 years"]];
 
-const START: IssueFilter = { hide_assigned: true, hide_linked: true, max_age_days: null, show_skipped: false };
+const START: IssueFilter = { hide_assigned: true, hide_linked: true, max_age_days: null, show_skipped: false, show_hidden: false };
+
+const FRESH_MS = 15 * 60 * 1000;
 
 function Unknown() {
   return (
@@ -51,7 +57,16 @@ function RepoView({ id }: { id: number }) {
     onSuccess: reload,
   });
 
-  const toggle = (key: "hide_assigned" | "hide_linked" | "show_skipped", label: string) => (
+  const fetchedAt = issues.data?.fetched_at;
+  const stale = issues.data !== undefined && (!fetchedAt || Date.now() - Date.parse(fetchedAt) > FRESH_MS);
+  const tried = useRef(false);
+  useEffect(() => {
+    if (!stale || tried.current) return;
+    tried.current = true;
+    refresh.mutate();
+  }, [stale]);
+
+  const toggle = (key: "hide_assigned" | "hide_linked" | "show_skipped" | "show_hidden", label: string) => (
     <button type="button" className={controls.choice} aria-pressed={filter[key]} onClick={() => set({ [key]: !filter[key] })}>{label}</button>
   );
 
@@ -95,6 +110,7 @@ function RepoView({ id }: { id: number }) {
           {toggle("hide_assigned", "Hide assigned")}
           {toggle("hide_linked", "Hide linked")}
           {toggle("show_skipped", "Show skipped")}
+          {(answer?.hidden ?? 0) > 0 && toggle("show_hidden", `Show ${answer?.hidden} hidden`)}
           <div className={styles.age}>
             <Segments items={AGES} value={filter.max_age_days} onChange={(max_age_days) => set({ max_age_days })} />
           </div>
@@ -104,13 +120,13 @@ function RepoView({ id }: { id: number }) {
       {never && (
         <div className={styles.blank}>
           <h2>Issues have not been fetched yet</h2>
-          <p>This repo was scanned before issues were part of a scan. Refresh issues fetches them now.</p>
+          <p>This repo was scanned before issues were part of a scan. They are being fetched now.</p>
         </div>
       )}
       {answer && !never && answer.issues.length === 0 && (
         <div className={styles.blank}>
           <h2>No issues to show</h2>
-          <p>Either none carry the labels this repo was fetched with, or the filters above hide them.</p>
+          <p>Nothing recent or labelled is left, or the filters above hide it.</p>
         </div>
       )}
       {answer?.issues.map((item) => (

@@ -106,7 +106,7 @@ describe("failures", () => {
 });
 
 describe("repo issues", () => {
-  const FILTER = { hide_assigned: true, hide_linked: false, max_age_days: null, show_skipped: false };
+  const FILTER = { hide_assigned: true, hide_linked: false, max_age_days: null, show_skipped: false, show_hidden: false };
 
   it("leaves an empty age limit out of the address", async () => {
     const fetch = answer(200, { issues: [] });

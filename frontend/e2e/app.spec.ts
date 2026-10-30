@@ -45,6 +45,35 @@ test("the results lead to a repo and its issues", async ({ page }) => {
   await expect(page.getByText("Fix the broken link")).toBeVisible();
 });
 
+test("an issue the rules hid comes back with its reason", async ({ page }) => {
+  backend.scans = [scanned()];
+  backend.repos = [scored("widgets", 7)];
+  await page.goto("/repos/7");
+
+  await expect(page.getByText("Fix the broken link")).toBeVisible();
+  await expect(page.getByText("Add a new option")).toBeHidden();
+
+  await page.getByRole("button", { name: "Show 1 hidden" }).click();
+
+  await expect(page.getByText("Add a new option")).toBeVisible();
+  await expect(page.getByText("Hidden: someone is on it")).toBeVisible();
+});
+
+test("an old list of issues is fetched again on arrival, a fresh one is not", async ({ page }) => {
+  backend.repos = [scored("widgets", 7), scored("gears", 8)];
+  await page.goto("/repos/7");
+  await expect(page.getByText("Fix the broken link")).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(backend.count("POST /repos/7/issues/refresh")).toBe(0);
+
+  backend.issuesFetchedAt = "2026-01-01T10:00:00Z";
+  await page.goto("/repos/8");
+
+  await expect.poll(() => backend.count("POST /repos/8/issues/refresh")).toBe(1);
+  await page.waitForTimeout(300);
+  expect(backend.count("POST /repos/8/issues/refresh")).toBe(1);
+});
+
 test("returning to the results asks for them once", async ({ page }) => {
   backend.scans = [scanned()];
   backend.repos = [scored("widgets", 7)];
